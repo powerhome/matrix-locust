@@ -61,6 +61,8 @@ Before you can use the Locust scripts to load your Matrix server, you
 first need to generate usernames and passwords for your Locust users,
 as well as the set of rooms where they will chat with each other.
 
+#### Standard Password-based Authentication
+
 First we generate the usernames and passwords.
 
 ```console
@@ -70,6 +72,23 @@ python generate_users.py
 This generates 1000 users by default and saves the usernames and passwords to
 a file called `users.csv`. You can also pass in a number to specify the number
 of users to generate.
+
+#### OIDC Authentication Support
+
+Matrix Locust now supports OIDC (OpenID Connect) authentication for testing
+homeservers configured with external identity providers. To generate users
+for OIDC testing:
+
+```console
+python generate_users.py 100 --oidc --oidc-issuer https://auth.example.com --domains example.com
+```
+
+This generates OIDC-enabled users instead of password-based users. The generated
+`users.csv` will contain OIDC configuration (issuer URL, client ID) instead of passwords.
+
+For detailed OIDC setup and usage instructions, see [OIDC_README.md](OIDC_README.md).
+
+#### Room Generation
 
 Next we need to decide what the rooms are going to look like in our test.
 The `generate_rooms.py` script generates as many rooms as there are users

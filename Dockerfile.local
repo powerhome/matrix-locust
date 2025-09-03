@@ -22,6 +22,8 @@ RUN poetry config virtualenvs.create false && \
 # Main image
 FROM python:3.12-alpine
 
+RUN apk add --no-cache libgcc
+
 # Set the working directory
 WORKDIR /usr/src/app
 

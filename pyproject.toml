@@ -15,6 +15,9 @@ keywords = ["matrix", "locust", "loadtest"]
 python = "^3.9"
 locust = "2.17.0"
 matrix-nio = "0.21.2"
+requests = "^2.31.0"
+pyjwt = "^2.8.0"
+cryptography = "^41.0.0"
 
 [tool.poetry.group.circles]
 optional = true
