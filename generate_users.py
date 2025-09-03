@@ -16,11 +16,20 @@ parser.add_argument("-d", "--domains", default=None,
 parser.add_argument("-w", "--weights", default=None,
                     type=lambda s: [float(item) for item in s.split(',')],
                     help="Comma (,) separated list of weights used for user domain assignment probability")
+parser.add_argument("--oidc", action="store_true", default=False,
+                    help="Generate users for OIDC authentication instead of password-based")
+parser.add_argument("--oidc-issuer", type=str, default=None,
+                    help="OIDC issuer URL for authentication")
+parser.add_argument("--oidc-client-id", type=str, default="matrix-locust",
+                    help="OIDC client ID for authentication")
 
 args = parser.parse_args()
 
 with open(args.output, "w", encoding="utf-8") as csvfile:
-    fieldnames = ["username", "password"]
+    if args.oidc:
+        fieldnames = ["username", "oidc_issuer", "oidc_client_id", "user_id"]
+    else:
+        fieldnames = ["username", "password"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
     for i in range(args.num_users):
@@ -29,16 +38,26 @@ with open(args.output, "w", encoding="utf-8") as csvfile:
         if args.domains is not None:
              host = random.choices(args.domains, args.weights)[0]
 
-        username = "user.{:06d}:{}".format(i, host)
-        # WARNING: This is not a safe way to generate real passwords!
-        #          Do not do this in real life!
-        #          Instead, use the Python `secrets` module.
-        #          Here we just want a quick way to generate lots of
-        #          passwords without eating up our system's entropy pool,
-        #          and anyway these are accounts that we are going to
-        #          throw away at the end of the test.
-        password = "".join(random.choices("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", k=16))
-        print(f"username = [{username}]\tpassword = [{password}]")
+        username = "user.{:06d}".format(i)
+        # username = "user.{:06d}:{}".format(i, host)
 
-        # Access token will be populated when the user is registered
-        writer.writerow({"username": username, "password": password})
+        if args.oidc:
+            if args.oidc_issuer is None:
+                raise ValueError("OIDC issuer URL is required when using --oidc")
+            user_id = "@{}".format(username)
+            print(f"username = [{username}]\toidc_issuer = [{args.oidc_issuer}]\tuser_id = [{user_id}]")
+            writer.writerow({"username": username, "oidc_issuer": args.oidc_issuer,
+                           "oidc_client_id": args.oidc_client_id, "user_id": user_id})
+        else:
+            # WARNING: This is not a safe way to generate real passwords!
+            #          Do not do this in real life!
+            #          Instead, use the Python `secrets` module.
+            #          Here we just want a quick way to generate lots of
+            #          passwords without eating up our system's entropy pool,
+            #          and anyway these are accounts that we are going to
+            #          throw away at the end of the test.
+            password = "".join(random.choices("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", k=16))
+            print(f"username = [{username}]\tpassword = [{password}]")
+
+            # Access token will be populated when the user is registered
+            writer.writerow({"username": username, "password": password})

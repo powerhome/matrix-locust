@@ -191,6 +191,38 @@ class MatrixUser(FastHttpUser):
 
         self.matrix_client.matrix_domain = self.matrix_client.user_id.split(":")[-1]
 
+    def login_from_csv_oidc(self, user_dict: Dict[str, str]) -> None:
+        """Log-in the user from OIDC credentials saved in the csv file
+
+        Args:
+            user_dict (dictionary): dictionary of the users.csv file with OIDC data
+        """
+        global tokens_dict
+
+        self.set_user(user_dict["username"])
+        oidc_issuer = user_dict.get("oidc_issuer")
+        oidc_client_id = user_dict.get("oidc_client_id", "matrix-locust")
+
+        if tokens_dict.get(self.matrix_client.user) is not None:
+            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get("user_id")
+            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get("access_token")
+            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get("next_batch")
+
+        # Handle empty strings
+        if self.matrix_client.user_id and len(self.matrix_client.user_id) < 1:
+            self.matrix_client.user_id = None
+        if self.matrix_client.access_token and len(self.matrix_client.access_token) < 1:
+            self.matrix_client.access_token = None
+        if self.matrix_client.next_batch and len(self.matrix_client.next_batch) < 1:
+            self.matrix_client.next_batch = None
+
+        # Store OIDC configuration for login
+        self.matrix_client.oidc_issuer = oidc_issuer
+        self.matrix_client.oidc_client_id = oidc_client_id
+
+        if user_dict.get("user_id"):
+            self.matrix_client.matrix_domain = user_dict["user_id"].split(":")[-1]
+
     def update_tokens(self) -> None:
         user_update_request = { "username": self.matrix_client.user,
                                 "user_id": self.matrix_client.user_id,

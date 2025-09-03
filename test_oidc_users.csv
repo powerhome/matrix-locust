@@ -1,0 +1,6 @@
+username,oidc_issuer,oidc_client_id,user_id
+user.000000:example.com,https://auth.example.com,matrix-locust,@user.000000:example.com
+user.000001:example.com,https://auth.example.com,matrix-locust,@user.000001:example.com
+user.000002:example.com,https://auth.example.com,matrix-locust,@user.000002:example.com
+user.000003:example.com,https://auth.example.com,matrix-locust,@user.000003:example.com
+user.000004:example.com,https://auth.example.com,matrix-locust,@user.000004:example.com

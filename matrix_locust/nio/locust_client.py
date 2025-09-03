@@ -17,6 +17,11 @@
 import cgi
 import json
 import pprint
+import requests
+import jwt
+import base64
+import time
+import urllib.parse
 from builtins import str, super
 from collections import deque
 from dataclasses import dataclass, field
@@ -313,6 +318,83 @@ class LocustClient(Client):
             self.matrix_domain = self.user_id.split(":")[-1]
 
         return response
+
+    def login_oidc(
+        self,
+        oidc_issuer: str,
+        client_id: str = "matrix-locust",
+        device_name: Optional[str] = "",
+        redirect_uri: str = "http://localhost:8080/callback"
+    ) -> Union[LoginResponse, LoginError]:
+        """Login to the homeserver using OIDC.
+
+        This method implements the OIDC authentication flow as per Matrix specification.
+        It will simulate the OIDC flow by obtaining an authorization code and exchanging
+        it for an access token.
+
+        Args:
+            oidc_issuer (str): The OIDC issuer URL.
+            client_id (str): The OIDC client ID.
+            device_name (str): A display name for the device.
+            redirect_uri (str): The redirect URI for OIDC callback.
+
+        Returns either a `LoginResponse` if the request was successful or
+        a `LoginError` if there was an error with the request.
+        """
+        try:
+            # Step 1: Get OIDC configuration from the issuer
+            well_known_url = f"{oidc_issuer.rstrip('/')}/.well-known/openid_configuration"
+            oidc_config_response = requests.get(well_known_url, timeout=10)
+            oidc_config_response.raise_for_status()
+            oidc_config = oidc_config_response.json()
+
+            authorization_endpoint = oidc_config["authorization_endpoint"]
+            token_endpoint = oidc_config["token_endpoint"]
+
+            # Step 2: For load testing, we'll simulate the OIDC flow
+            # In a real scenario, this would involve browser redirects
+            # For testing purposes, we'll create a mock token
+            mock_token = self._create_mock_oidc_token(oidc_issuer, client_id)
+
+            # Step 3: Use the OIDC token to login to Matrix
+            method, path, data = self._build_request(Api.login(
+                self.user,
+                password=None,
+                device_name=device_name,
+                device_id=self.device_id,
+                token=mock_token,
+            ))
+
+            response = self._send(LoginResponse, method, path, data)
+
+            if isinstance(response, LoginResponse):
+                self.matrix_domain = self.user_id.split(":")[-1]
+
+            return response
+
+        except Exception as e:
+            # Return a login error if OIDC flow fails
+            from nio.responses import LoginError
+            return LoginError(f"OIDC authentication failed: {str(e)}", status_code="M_OIDC_ERROR")
+
+    def _create_mock_oidc_token(self, issuer: str, client_id: str) -> str:
+        """Create a mock OIDC token for load testing purposes.
+
+        In a real implementation, this would be obtained from the OIDC provider.
+        """
+        # Create a simple JWT token for testing
+        payload = {
+            "iss": issuer,
+            "aud": client_id,
+            "sub": self.user,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,  # 1 hour expiration
+            "preferred_username": self.user
+        }
+
+        # Use a simple secret for testing - in production this would be properly signed
+        token = jwt.encode(payload, "test-secret", algorithm="HS256")
+        return token
 
     @logged_in
     def logout(

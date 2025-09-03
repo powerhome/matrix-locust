@@ -1,0 +1,11 @@
+{
+    "name": "OIDC Login Test - 100 Users",
+    "script": "locust-oidc-login.py",
+    "pre_script_command": "python3",
+    "pre_script_command_args": ["generate_users.py", "100", "--oidc", "--oidc-issuer", "https://auth.example.com", "--domains", "example.com"],
+    "num_users": 100,
+    "spawn_rate": 10,
+    "runtime": 300,
+    "autoquit": 5,
+    "output_dir": "."
+}
