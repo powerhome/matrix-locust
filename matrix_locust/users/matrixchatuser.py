@@ -275,9 +275,9 @@ class MatrixChatUser(MatrixUser):
     def send_text(self):
         room_id = self.get_random_roomid()
         if room_id is None:
-            #logging.warning("User [%s] couldn't get a room for send_text" % self.username)
+            logging.warning("User [%s] couldn't get a room for send_text" % self.matrix_client.user)
             return
-        #logging.info("User [%s] sending a message to room [%s]" % (self.username, room_id))
+        logging.info("User [%s] sending a message to room [%s]" % (self.matrix_client.user, room_id))
 
         # Send the typing notification like a real client would
         self.matrix_client.room_typing(room_id, True)
@@ -302,9 +302,9 @@ class MatrixChatUser(MatrixUser):
     def look_at_room(self):
         room_id = self.get_random_roomid()
         if room_id is None:
-            #logging.warning("User [%s] couldn't get a roomid for look_at_room" % self.username)
+            logging.warning("User [%s] couldn't get a roomid for look_at_room" % self.matrix_client.user)
             return
-        #logging.info("User [%s] looking at room [%s]" % (self.username, room_id))
+        logging.info("User [%s] looking at room [%s]" % (self.matrix_client.user, room_id))
 
         self.load_data_for_room(room_id)
 
@@ -439,7 +439,7 @@ class MatrixChatUser(MatrixUser):
 
         @task
         def stop(self):
-            #logging.info("User [%s] stopping chat in room [%s]" % (self.user.username, self.room_id))
+            logging.info("User [%s] stopping chat in room [%s]" % (self.user.matrix_client.user, self.room_id))
             self.interrupt()
 
         # Each time we create a new instance of this task, we want to have the user
