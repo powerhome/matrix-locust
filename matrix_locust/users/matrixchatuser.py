@@ -80,6 +80,7 @@ def on_locust_init(environment, **_kwargs):
 images_folder = "images"
 image_files = glob.glob(os.path.join(images_folder, "*.jpg"))
 images_with_thumbnails = []
+delay_multiplier = 0.1
 for image_filename in image_files:
     image_basename = os.path.basename(image_filename)
     thumbnail_filename = os.path.join(images_folder, "thumbnails", image_basename)
@@ -283,7 +284,7 @@ class MatrixChatUser(MatrixUser):
         self.matrix_client.room_typing(room_id, True)
         # Sleep while we pretend the user is banging on the keyboard
         delay = random.expovariate(1.0 / 5.0)
-        gevent.sleep(delay)
+        gevent.sleep(delay * delay_multiplier)
 
         message_len = round(random.lognormvariate(1.0, 1.0))
         message_len = min(message_len, len(lorem_ipsum_words))
@@ -338,8 +339,9 @@ class MatrixChatUser(MatrixUser):
     def go_afk(self):
         logging.info("[%s] going away from keyboard", self.matrix_client.user)
         # Generate large(ish) random away time
-        away_time = random.expovariate(1.0 / 600.0)  # Expected value = 10 minutes
-        gevent.sleep(away_time)
+        # away_time = random.expovariate(1.0 / 600.0)  # Expected value = 10 minutes
+        away_time = random.expovariate(1.0 / 60.0)  # Expected value = 1 minutes
+        gevent.sleep(away_time * delay_multiplier)
 
 
     @task(1)
@@ -359,7 +361,7 @@ class MatrixChatUser(MatrixUser):
 
         def wait_time(self):
             expected_wait = 25.0
-            rate = 1.0 / expected_wait
+            rate = 1.0 / expected_wait * delay_multiplier
             return random.expovariate(rate)
 
         def on_start(self):
@@ -381,7 +383,7 @@ class MatrixChatUser(MatrixUser):
             self.user.matrix_client.room_typing(self.room_id, True)
             # Sleep while we pretend the user is banging on the keyboard
             delay = random.expovariate(1.0 / 5.0)
-            gevent.sleep(delay)
+            gevent.sleep(delay * delay_multiplier)
 
             message_len = round(random.lognormvariate(1.0, 1.0))
             message_len = min(message_len, len(lorem_ipsum_words))
