@@ -12,6 +12,7 @@ from locust.runners import MasterRunner, WorkerRunner
 import gevent
 from matrix_locust.users.matrixuser import MatrixUser
 from nio.responses import RoomCreateError, LoginError
+from nio.api import RoomVisibility
 
 # Preflight ####################################################################
 
@@ -57,7 +58,7 @@ def on_test_start(environment, **_kwargs):
         # with the list of other users who should be invited to each
         MatrixRoomCreatorUser.worker_rooms_for_users = {}
         for room_name, room_users in rooms.items():
-            first_user = username_to_userid(room_users[0])
+            first_user = room_users[0]
             user_rooms = MatrixRoomCreatorUser.worker_rooms_for_users.get(first_user, [])
             room_info = {
                 "name": room_name,
@@ -112,10 +113,8 @@ class MatrixRoomCreatorUser(MatrixUser):
             if isinstance(response, LoginError):
                 logging.error("Login failed for User [%s]", self.matrix_client.user)
                 return
-
-        my_rooms_info = MatrixRoomCreatorUser.worker_rooms_for_users.get(
-            username_to_userid(self.matrix_client.user, self.matrix_client.matrix_domain), [])
-        #logging.info("User [%s] Found %d rooms to be created", self.username, len(my_rooms_info))
+        my_rooms_info = MatrixRoomCreatorUser.worker_rooms_for_users.get(self.matrix_client.user, [])
+        logging.info("User [%s] Found %d rooms to be created", self.matrix_client.user, len(my_rooms_info))
 
         for room_info in my_rooms_info:
             room_name = room_info["name"]
@@ -128,7 +127,17 @@ class MatrixRoomCreatorUser(MatrixUser):
             # Actually create the room
             retries = 3
             while retries > 0:
-                response = self.matrix_client.room_create(alias=None, name=room_name, invite=user_ids, federate=True)
+
+                # response = self.matrix_client.room_create(alias=None, name=room_name, invite=user_ids, federate=True)
+                response = self.matrix_client.room_create(
+                    alias=None,
+                    name=room_name,
+                    federate=False,
+                    visibility=RoomVisibility.public,
+                    preset=None,
+                    invite=(),
+                    initial_state=(),
+                    power_level_override=None)
 
                 if isinstance(response, RoomCreateError):
                     logging.error("[%s] Could not create room %s (attempt %d). Trying again...",
