@@ -285,6 +285,44 @@ class MatrixUser(FastHttpUser):
         if user_dict.get("user_id"):
             self.matrix_client.matrix_domain = user_dict["user_id"].split(":")[-1]
 
+    def login_from_csv_real_oidc(self, user_dict: Dict[str, str]) -> None:
+        """Log-in the user from the credentials saved in the csv file
+
+        Args:
+            user_dict (dictionary): dictionary of the users.csv file
+        """
+        global tokens_dict
+
+        self.set_user(user_dict["username"])
+        self.matrix_client.password = user_dict["password"]
+        self.matrix_client.oidc_issuer = user_dict.get("oidc_issuer")
+        self.matrix_client.oidc_client_id = user_dict.get("oidc_client_id")
+
+        if tokens_dict.get(self.matrix_client.user) is not None:
+            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get(
+                "user_id"
+            )
+            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get(
+                "access_token"
+            )
+            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get(
+                "next_batch"
+            )
+
+        # Handle empty strings
+        if (
+            len(self.matrix_client.user_id) < 1
+            or len(self.matrix_client.access_token) < 1
+        ):
+            self.matrix_client.user_id = None
+            self.matrix_client.access_token = None
+            return
+
+        if len(self.matrix_client.next_batch) < 1:
+            self.matrix_client.next_batch = None
+
+        self.matrix_client.matrix_domain = self.matrix_client.user_id.split(":")[-1]
+
     def update_tokens(self) -> None:
         user_update_request = {
             "username": self.matrix_client.user,
