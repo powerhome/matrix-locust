@@ -28,34 +28,24 @@
 ###########################################################
 
 import csv
-import os
-import sys
 import glob
-import random
-import resource
-
 import json
 import logging
-
-import gevent
-from locust import task, between, TaskSet
-from locust import events
-from locust.runners import MasterRunner, WorkerRunner
-
-from matrix_locust.users.matrixuser import MatrixUser
-from nio import MatrixRoom, RoomMessageText
-from nio.responses import (
-    LoginError,
-    SyncError,
-    RoomSendError,
-    RoomMessagesError,
-    ProfileSetDisplayNameError,
-)
-
+import os
+import random
+import resource
+import sys
 from typing import Optional
 
+import gevent
+from locust import TaskSet, between, events, task
+from locust.runners import MasterRunner, WorkerRunner
+from nio import MatrixRoom, RoomMessageText
 from nio.api import _FilterT
+from nio.responses import (LoginError, ProfileSetDisplayNameError,
+                           RoomMessagesError, RoomSendError, SyncError)
 
+from matrix_locust.users.matrixuser import MatrixUser
 
 # Preflight ###############################################
 

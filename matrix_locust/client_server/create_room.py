@@ -5,14 +5,13 @@ import json
 import logging
 import resource
 
-from locust import task, constant
-from locust import events
-from locust.runners import MasterRunner, WorkerRunner
-
 import gevent
-from matrix_locust.users.matrixuser import MatrixUser
-from nio.responses import RoomCreateError, LoginError
+from locust import constant, events, task
+from locust.runners import MasterRunner, WorkerRunner
 from nio.api import RoomVisibility
+from nio.responses import LoginError, RoomCreateError
+
+from matrix_locust.users.matrixuser import MatrixUser
 
 # Preflight ####################################################################
 

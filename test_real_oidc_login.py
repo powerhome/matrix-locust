@@ -21,12 +21,14 @@ Requirements:
 """
 
 import argparse
-import logging
-import sys
-import os
 import getpass
+import logging
+import os
+import sys
+
+from nio.responses import LoginError, LoginResponse
+
 from matrix_locust.nio.locust_client import LocustClient
-from nio.responses import LoginResponse, LoginError
 
 # Setup logging
 logging.basicConfig(

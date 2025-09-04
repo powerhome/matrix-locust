@@ -20,26 +20,24 @@
 ################################################################################
 
 import csv
-import os
-import sys
 import glob
-import random
-import resource
 import json
 import logging
-from http import HTTPStatus
 import mimetypes
-
-from locust import task, between, TaskSet, FastHttpUser
-from locust import events
-from locust.runners import MasterRunner, WorkerRunner
+import os
+import random
+import resource
+import sys
 from collections import namedtuple
-
-import gevent
-from matrix_locust.nio.locust_client import LocustClient
-from nio.responses import RegisterResponse, LoginResponse, SyncResponse
+from http import HTTPStatus
 from typing import Dict
 
+import gevent
+from locust import FastHttpUser, TaskSet, between, events, task
+from locust.runners import MasterRunner, WorkerRunner
+from nio.responses import LoginResponse, RegisterResponse, SyncResponse
+
+from matrix_locust.nio.locust_client import LocustClient
 
 # Locust functions for distributing users to workers ###########################
 

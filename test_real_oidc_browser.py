@@ -10,17 +10,19 @@ Usage:
     poetry run python test_real_oidc_browser.py
 """
 
-import webbrowser
-import os
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
-import urllib.parse
-import time
-import logging
 import json
+import logging
+import os
+import threading
+import time
+import urllib.parse
+import webbrowser
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from nio.responses import LoginError, LoginResponse
+
 from matrix_locust.nio.locust_client import LocustClient
-from nio.responses import LoginResponse, LoginError
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
