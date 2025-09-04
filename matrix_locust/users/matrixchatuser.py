@@ -59,6 +59,7 @@ from nio.api import _FilterT
 
 # Preflight ###############################################
 
+
 @events.init.add_listener
 def on_locust_init(environment, **_kwargs):
     # Increase resource limits to prevent OS running out of descriptors
@@ -72,9 +73,12 @@ def on_locust_init(environment, **_kwargs):
         print(f"Registered 'load_users' handler on {environment.runner.client_id}")
         environment.runner.register_message("load_users", MatrixChatUser.load_users)
     # Single-worker
-    elif not isinstance(environment.runner, WorkerRunner) and not isinstance(environment.runner, MasterRunner):
+    elif not isinstance(environment.runner, WorkerRunner) and not isinstance(
+        environment.runner, MasterRunner
+    ):
         # Open our list of users
         MatrixChatUser.worker_users = csv.DictReader(open("users.csv"))
+
 
 # Load our images and thumbnails
 images_folder = "images"
@@ -99,11 +103,10 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor i
 lorem_ipsum_words = lorem_ipsum_text.split()
 
 lorem_ipsum_messages = {}
-for i in range(1, len(lorem_ipsum_words)+1):
+for i in range(1, len(lorem_ipsum_words) + 1):
     lorem_ipsum_messages[i] = " ".join(lorem_ipsum_words[:i])
 
 ###########################################################
-
 
 
 class MatrixChatUser(MatrixUser):
@@ -114,7 +117,9 @@ class MatrixChatUser(MatrixUser):
     def load_users(environment, msg, **_kwargs):
         MatrixChatUser.worker_users = iter(msg.data)
         MatrixChatUser.worker_id = environment.runner.client_id
-        logging.info("Worker [%s] Received %s users", environment.runner.client_id, len(msg.data))
+        logging.info(
+            "Worker [%s] Received %s users", environment.runner.client_id, len(msg.data)
+        )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -151,8 +156,12 @@ class MatrixChatUser(MatrixUser):
             self.matrix_client.access_token = None
 
         # Log in as this current user if not already logged in
-        if self.matrix_client.user_id is None or self.matrix_client.access_token is None or \
-            len(self.matrix_client.user_id) < 1 or len(self.matrix_client.access_token) < 1:
+        if (
+            self.matrix_client.user_id is None
+            or self.matrix_client.access_token is None
+            or len(self.matrix_client.user_id) < 1
+            or len(self.matrix_client.access_token) < 1
+        ):
 
             while True:
                 response = self.matrix_client.login(self.matrix_client.password)
@@ -164,7 +173,9 @@ class MatrixChatUser(MatrixUser):
                     break
 
         # Spawn a Greenlet to act as this user's client, constantly /sync'ing with the server
-        self.matrix_sync_task = gevent.spawn(self.sync_forever, client_sleep=None, timeout=30_000)
+        self.matrix_sync_task = gevent.spawn(
+            self.sync_forever, client_sleep=None, timeout=30_000
+        )
 
         # Wait a bit before we take our first action
         self.wait()
@@ -181,21 +192,20 @@ class MatrixChatUser(MatrixUser):
         else:
             return None
 
-
     def load_data_for_room(self, room_id):
         # FIXME Need to parse the room state for all of this :-\
         ## FIXME Load the room displayname and avatar url
         ## FIXME If we don't have it, load the avatar image
-        #room_displayname = self.room_display_names.get(room_id, None)
-        #if room_displayname is None:
+        # room_displayname = self.room_display_names.get(room_id, None)
+        # if room_displayname is None:
         #  # Uh-oh, do we need to parse the room state from /sync in order to get this???
         #  pass
-        #room_avatar_url = self.room_avatar_urls.get(room_id, None)
-        #if room_avatar_url is None:
+        # room_avatar_url = self.room_avatar_urls.get(room_id, None)
+        # if room_avatar_url is None:
         #  # Uh-oh, do we need to parse the room state from /sync in order to get this???
         #  pass
         ## Note: We may have just set room_avatar_url in the code above
-        #if room_avatar_url is not None and self.media_cache.get(room_avatar_url, False) is False:
+        # if room_avatar_url is not None and self.media_cache.get(room_avatar_url, False) is False:
         #  # FIXME Download the image and set the cache to True
         #  pass
 
@@ -230,7 +240,6 @@ class MatrixChatUser(MatrixUser):
         #         if thumb_mxc is not None:
         #             self.download_matrix_media(thumb_mxc)
 
-
     def sync_forever(
         self,
         client_sleep: Optional[float] = None,
@@ -246,16 +255,22 @@ class MatrixChatUser(MatrixUser):
         # Put anything that the user might care about into our instance variables where the
         # user @task's can find it
         while True:
-            response = self.matrix_client.sync(timeout, sync_filter, since, full_state, set_presence)
+            response = self.matrix_client.sync(
+                timeout, sync_filter, since, full_state, set_presence
+            )
 
             if isinstance(response, SyncError):
-                logging.error("[%s] /sync error (%s): %s",
-                              self.matrix_client.user, response.status_code, response.message)
+                logging.error(
+                    "[%s] /sync error (%s): %s",
+                    self.matrix_client.user,
+                    response.status_code,
+                    response.message,
+                )
             else:
                 if self.initial_sync_token is None:
                     self.initial_sync_token = response.next_batch
 
-            if not(client_sleep is None):
+            if not (client_sleep is None):
                 gevent.sleep(client_sleep)
 
     def message_callback(self, room: MatrixRoom, event: RoomMessageText) -> None:
@@ -267,7 +282,6 @@ class MatrixChatUser(MatrixUser):
         # Store only the most recent 10 messages, regardless of how many we had before or how many we just received
         self.recent_messages[room.room_id] = self.room_messages[room.room_id][-10:]
 
-
     @task(23)
     def do_nothing(self):
         self.wait()
@@ -276,9 +290,14 @@ class MatrixChatUser(MatrixUser):
     def send_text(self):
         room_id = self.get_random_roomid()
         if room_id is None:
-            logging.warning("User [%s] couldn't get a room for send_text" % self.matrix_client.user)
+            logging.warning(
+                "User [%s] couldn't get a room for send_text" % self.matrix_client.user
+            )
             return
-        logging.info("User [%s] sending a message to room [%s]" % (self.matrix_client.user, room_id))
+        logging.info(
+            "User [%s] sending a message to room [%s]"
+            % (self.matrix_client.user, room_id)
+        )
 
         # Send the typing notification like a real client would
         self.matrix_client.room_typing(room_id, True)
@@ -295,17 +314,28 @@ class MatrixChatUser(MatrixUser):
             "body": message_text,
         }
 
-        response = self.matrix_client.room_send(room_id, "m.room.message", message_content)
+        response = self.matrix_client.room_send(
+            room_id, "m.room.message", message_content
+        )
         if isinstance(response, RoomSendError):
-            logging.error("[%s] failed to send m.text to room [%s]", self.matrix_client.user, room_id)
+            logging.error(
+                "[%s] failed to send m.text to room [%s]",
+                self.matrix_client.user,
+                room_id,
+            )
 
     @task(4)
     def look_at_room(self):
         room_id = self.get_random_roomid()
         if room_id is None:
-            logging.warning("User [%s] couldn't get a roomid for look_at_room" % self.matrix_client.user)
+            logging.warning(
+                "User [%s] couldn't get a roomid for look_at_room"
+                % self.matrix_client.user
+            )
             return
-        logging.info("User [%s] looking at room [%s]" % (self.matrix_client.user, room_id))
+        logging.info(
+            "User [%s] looking at room [%s]" % (self.matrix_client.user, room_id)
+        )
 
         self.load_data_for_room(room_id)
 
@@ -314,7 +344,6 @@ class MatrixChatUser(MatrixUser):
 
         event_id = self.recent_messages[room_id][-1].event_id
         self.matrix_client.update_receipt_marker(room_id, event_id)
-
 
     # FIXME Combine look_at_room() and paginate_room() into a TaskSet,
     #       so the user can paginate and scroll the room for a longer
@@ -331,7 +360,11 @@ class MatrixChatUser(MatrixUser):
 
         response = self.matrix_client.room_messages(room_id, token)
         if isinstance(response, RoomMessagesError):
-            logging.error("[%s] failed /messages failed for room [%s]", self.matrix_client.user, room_id)
+            logging.error(
+                "[%s] failed /messages failed for room [%s]",
+                self.matrix_client.user,
+                room_id,
+            )
         else:
             self.earliest_sync_tokens[room_id] = response.end
 
@@ -343,18 +376,21 @@ class MatrixChatUser(MatrixUser):
         away_time = random.expovariate(1.0 / 60.0)  # Expected value = 1 minutes
         gevent.sleep(away_time * delay_multiplier)
 
-
     @task(1)
     def change_displayname(self):
         user_number = self.matrix_client.user.split(".")[-1]
-        random_number = random.randint(1,1000)
+        random_number = random.randint(1, 1000)
         new_name = "User %s (random=%d)" % (user_number, random_number)
 
         response = self.matrix_client.set_displayname(new_name)
         if isinstance(response, ProfileSetDisplayNameError):
-            logging.error("[%s] failed to set displayname to %s: Code=%s, Message=%s",
-                          self.matrix_client.user, new_name, response.status_code, response.message)
-
+            logging.error(
+                "[%s] failed to set displayname to %s: Code=%s, Message=%s",
+                self.matrix_client.user,
+                new_name,
+                response.status_code,
+                response.message,
+            )
 
     @task(3)
     class ChatInARoom(TaskSet):
@@ -365,7 +401,7 @@ class MatrixChatUser(MatrixUser):
             return random.expovariate(rate)
 
         def on_start(self):
-            #logging.info("User [%s] chatting in a room" % self.user.username)
+            # logging.info("User [%s] chatting in a room" % self.user.username)
             if len(self.user.matrix_client.rooms.keys()) == 0:
                 self.interrupt()
             else:
@@ -394,9 +430,15 @@ class MatrixChatUser(MatrixUser):
                 "body": message_text,
             }
 
-            response = self.user.matrix_client.room_send(self.room_id, "m.room.message", message_content)
+            response = self.user.matrix_client.room_send(
+                self.room_id, "m.room.message", message_content
+            )
             if isinstance(response, RoomSendError):
-                logging.error("[%s] failed to send/chat in room [%s]", self.user.matrix_client.user, self.room_id)
+                logging.error(
+                    "[%s] failed to send/chat in room [%s]",
+                    self.user.matrix_client.user,
+                    self.room_id,
+                )
 
         @task
         def send_image(self):
@@ -407,7 +449,6 @@ class MatrixChatUser(MatrixUser):
             # Send the event
             pass
 
-
         @task
         def send_reaction(self):
             # Pick a recent message from the selected room,
@@ -416,7 +457,7 @@ class MatrixChatUser(MatrixUser):
                 return
 
             message = random.choice(self.user.recent_messages[self.room_id])
-            reaction = random.choice(["💩","👍","❤️", "👎", "🤯", "😱", "👏"])
+            reaction = random.choice(["💩", "👍", "❤️", "👎", "🤯", "😱", "👏"])
             content = {
                 "m.relates_to": {
                     "rel_type": "m.annotation",
@@ -433,23 +474,32 @@ class MatrixChatUser(MatrixUser):
 
             # logging.info("[%s] sending reaction %s to message %s in room %s with event %s",
             #              self.user.matrix_client.user, reaction, message, self.room_id, message.event_id)
-            response = self.user.matrix_client.room_send(self.room_id, "m.reaction", content)
+            response = self.user.matrix_client.room_send(
+                self.room_id, "m.reaction", content
+            )
             if isinstance(response, RoomSendError):
-                logging.error("[%s] failed to send reaction in room [%s]: Code=%s, Message=%s",
-                              self.user.matrix_client.user, response.room_id, response.status_code, response.message)
-
+                logging.error(
+                    "[%s] failed to send reaction in room [%s]: Code=%s, Message=%s",
+                    self.user.matrix_client.user,
+                    response.room_id,
+                    response.status_code,
+                    response.message,
+                )
 
         @task
         def stop(self):
-            logging.info("User [%s] stopping chat in room [%s]" % (self.user.matrix_client.user, self.room_id))
+            logging.info(
+                "User [%s] stopping chat in room [%s]"
+                % (self.user.matrix_client.user, self.room_id)
+            )
             self.interrupt()
 
         # Each time we create a new instance of this task, we want to have the user
         # generate a slightly different expected number of messages.
         # FIXME Hmmm this doesn't seem to work...
         tasks = {
-            send_text: max(1, round(random.gauss(15,4))),
-            send_image: random.choice([0,0,0,1,1,2]),
-            send_reaction: random.choice([0,0,1,1,1,2,3]),
+            send_text: max(1, round(random.gauss(15, 4))),
+            send_image: random.choice([0, 0, 0, 1, 1, 2]),
+            send_reaction: random.choice([0, 0, 1, 1, 1, 2, 3]),
             stop: 1,
         }

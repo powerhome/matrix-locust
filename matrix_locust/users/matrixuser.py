@@ -47,11 +47,15 @@ tokens_dict = {}
 if os.path.exists("tokens.csv"):
     with open("tokens.csv", "r", encoding="utf-8") as csvfile:
         csv_header = ["username", "user_id", "access_token", "next_batch"]
-        tokens_dict = { row["username"]: { "user_id": row["user_id"],
-                                        "access_token": row["access_token"],
-                                        "next_batch": row["next_batch"] }
-                    for row in csv.DictReader(csvfile, fieldnames=csv_header) }
-        tokens_dict.pop("username") # Dict includes the header values, so remove it
+        tokens_dict = {
+            row["username"]: {
+                "user_id": row["user_id"],
+                "access_token": row["access_token"],
+                "next_batch": row["next_batch"],
+            }
+            for row in csv.DictReader(csvfile, fieldnames=csv_header)
+        }
+        tokens_dict.pop("username")  # Dict includes the header values, so remove it
 
 locust_users = []
 
@@ -59,6 +63,7 @@ locust_users = []
 
 
 # Preflight ####################################################################
+
 
 @events.init.add_listener
 def on_locust_init(environment, **_kwargs):
@@ -73,6 +78,7 @@ def on_locust_init(environment, **_kwargs):
         print("Registered 'update_tokens' handler on master worker")
         environment.runner.register_message("update_tokens", update_tokens)
 
+
 @events.test_stop.add_listener
 def on_test_stop(environment, **_kwargs):
     global tokens_dict
@@ -83,9 +89,16 @@ def on_test_stop(environment, **_kwargs):
         writer = csv.DictWriter(csvfile, fieldnames=csv_header)
         writer.writeheader()
 
-        for (k, v) in sorted(tokens_dict.items()):
-            writer.writerow({"username": k, "user_id": v["user_id"],
-                            "access_token": v["access_token"], "next_batch": v["next_batch"]})
+        for k, v in sorted(tokens_dict.items()):
+            writer.writerow(
+                {
+                    "username": k,
+                    "user_id": v["user_id"],
+                    "access_token": v["access_token"],
+                    "next_batch": v["next_batch"],
+                }
+            )
+
 
 @events.test_start.add_listener
 def on_test_start(environment, **_kwargs):
@@ -94,13 +107,18 @@ def on_test_start(environment, **_kwargs):
         print("Loading users and sending to workers")
         with open("users.csv", "r", encoding="utf-8") as csvfile:
             user_reader = csv.DictReader(csvfile)
-            locust_users = [ user for user in user_reader ]
+            locust_users = [user for user in user_reader]
 
             # Divide up users between all workers
-            for (client_id, index) in environment.runner.worker_indexes.items():
-                user_count = int(len(locust_users) / environment.runner.worker_index_max)
-                remainder = 0 if index != environment.runner.worker_index_max - 1 \
-                            else (len(locust_users) % environment.runner.worker_index_max)
+            for client_id, index in environment.runner.worker_indexes.items():
+                user_count = int(
+                    len(locust_users) / environment.runner.worker_index_max
+                )
+                remainder = (
+                    0
+                    if index != environment.runner.worker_index_max - 1
+                    else (len(locust_users) % environment.runner.worker_index_max)
+                )
 
                 start = index * user_count
                 end = start + user_count + remainder
@@ -109,7 +127,9 @@ def on_test_start(environment, **_kwargs):
                 print(f"Sending {len(users)} users to {client_id}")
                 environment.runner.send_message("load_users", users, client_id)
 
+
 ################################################################################
+
 
 def update_tokens(environment, msg, **_kwargs):
     """Updates the given user's access and sync tokens for writing to the csv file"""
@@ -119,7 +139,12 @@ def update_tokens(environment, msg, **_kwargs):
     access_token = msg.data["access_token"]
     next_batch = msg.data["next_batch"]
 
-    tokens_dict[username] = { "user_id": user_id, "access_token": access_token, "next_batch": next_batch }
+    tokens_dict[username] = {
+        "user_id": user_id,
+        "access_token": access_token,
+        "next_batch": next_batch,
+    }
+
 
 class MatrixUser(FastHttpUser):
     # Don't ever directly instantiate this class
@@ -148,21 +173,33 @@ class MatrixUser(FastHttpUser):
     def reset_client(self):
         """Resets the matrix_client state"""
         self.matrix_client = LocustClient(self)
-        self.matrix_client.add_response_callback(self._handle_register_response, RegisterResponse)
-        self.matrix_client.add_response_callback(self._handle_login_response, LoginResponse)
-        self.matrix_client.add_response_callback(self._handle_sync_response, SyncResponse)
+        self.matrix_client.add_response_callback(
+            self._handle_register_response, RegisterResponse
+        )
+        self.matrix_client.add_response_callback(
+            self._handle_login_response, LoginResponse
+        )
+        self.matrix_client.add_response_callback(
+            self._handle_sync_response, SyncResponse
+        )
 
     def set_user(self, user_id):
         """Sets the locust username and host based on user_id"""
         if user_id.find(":") == -1:
             self.matrix_client.user = user_id
         else:
-            self.matrix_client.user = user_id[:user_id.find(":")]
+            self.matrix_client.user = user_id[: user_id.find(":")]
             self.matrix_client.matrix_domain = user_id.split(":")[-1]
 
-            protocol = self.matrix_client.locust_user.host[:self.matrix_client.locust_user.host.rfind("/") + 1]
-            self.matrix_client.locust_user.host = protocol + "matrix." + self.matrix_client.matrix_domain
-            self.matrix_client.locust_user.client.base_url = self.matrix_client.locust_user.host
+            protocol = self.matrix_client.locust_user.host[
+                : self.matrix_client.locust_user.host.rfind("/") + 1
+            ]
+            self.matrix_client.locust_user.host = (
+                protocol + "matrix." + self.matrix_client.matrix_domain
+            )
+            self.matrix_client.locust_user.client.base_url = (
+                self.matrix_client.locust_user.host
+            )
 
     def login_from_csv(self, user_dict: Dict[str, str]) -> None:
         """Log-in the user from the credentials saved in the csv file
@@ -176,12 +213,21 @@ class MatrixUser(FastHttpUser):
         self.matrix_client.password = user_dict["password"]
 
         if tokens_dict.get(self.matrix_client.user) is not None:
-            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get("user_id")
-            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get("access_token")
-            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get("next_batch")
+            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get(
+                "user_id"
+            )
+            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get(
+                "access_token"
+            )
+            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get(
+                "next_batch"
+            )
 
         # Handle empty strings
-        if len(self.matrix_client.user_id) < 1 or len(self.matrix_client.access_token) < 1:
+        if (
+            len(self.matrix_client.user_id) < 1
+            or len(self.matrix_client.access_token) < 1
+        ):
             self.matrix_client.user_id = None
             self.matrix_client.access_token = None
             return
@@ -204,9 +250,15 @@ class MatrixUser(FastHttpUser):
         oidc_client_id = user_dict.get("oidc_client_id", "matrix-locust")
 
         if tokens_dict.get(self.matrix_client.user) is not None:
-            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get("user_id")
-            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get("access_token")
-            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get("next_batch")
+            self.matrix_client.user_id = tokens_dict[self.matrix_client.user].get(
+                "user_id"
+            )
+            self.matrix_client.access_token = tokens_dict[self.matrix_client.user].get(
+                "access_token"
+            )
+            self.matrix_client.next_batch = tokens_dict[self.matrix_client.user].get(
+                "next_batch"
+            )
 
         # Handle empty strings
         if self.matrix_client.user_id and len(self.matrix_client.user_id) < 1:
@@ -219,23 +271,27 @@ class MatrixUser(FastHttpUser):
         # Store OIDC configuration for login
         self.matrix_client.oidc_issuer = oidc_issuer
         self.matrix_client.oidc_client_id = oidc_client_id
-        
+
         # Get NitroID credentials from environment variables
         # This replaces the previous CSV-based password storage for security
-        self.matrix_client.oidc_username = os.getenv('NITROID_USERNAME')
-        self.matrix_client.oidc_password = os.getenv('NITROID_PASSWORD')
-        
+        self.matrix_client.oidc_username = os.getenv("NITROID_USERNAME")
+        self.matrix_client.oidc_password = os.getenv("NITROID_PASSWORD")
+
         # Log if credentials are not available
         if not self.matrix_client.oidc_username or not self.matrix_client.oidc_password:
-            logging.warning(f"NITROID_USERNAME and/or NITROID_PASSWORD environment variables not set for user {self.matrix_client.user}")
+            logging.warning(
+                f"NITROID_USERNAME and/or NITROID_PASSWORD environment variables not set for user {self.matrix_client.user}"
+            )
             logging.warning("OIDC login will fail without valid credentials")
 
         if user_dict.get("user_id"):
             self.matrix_client.matrix_domain = user_dict["user_id"].split(":")[-1]
 
     def update_tokens(self) -> None:
-        user_update_request = { "username": self.matrix_client.user,
-                                "user_id": self.matrix_client.user_id,
-                                "access_token": self.matrix_client.access_token,
-                                "next_batch": self.matrix_client.next_batch }
+        user_update_request = {
+            "username": self.matrix_client.user,
+            "user_id": self.matrix_client.user_id,
+            "access_token": self.matrix_client.access_token,
+            "next_batch": self.matrix_client.next_batch,
+        }
         self.environment.runner.send_message("update_tokens", user_update_request)

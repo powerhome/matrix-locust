@@ -14,6 +14,7 @@ from nio.responses import LoginError
 
 # Preflight ####################################################################
 
+
 @events.init.add_listener
 def on_locust_init(environment, **_kwargs):
     # Increase resource limits to prevent OS running out of descriptors
@@ -27,9 +28,12 @@ def on_locust_init(environment, **_kwargs):
         print(f"Registered 'load_users' handler on {environment.runner.client_id}")
         environment.runner.register_message("load_users", MatrixOIDCUser.load_users)
     # Single-worker
-    elif not isinstance(environment.runner, WorkerRunner) and not isinstance(environment.runner, MasterRunner):
+    elif not isinstance(environment.runner, WorkerRunner) and not isinstance(
+        environment.runner, MasterRunner
+    ):
         # Open our list of users
         MatrixOIDCUser.worker_users = csv.DictReader(open("users.csv"))
+
 
 ################################################################################
 
@@ -43,7 +47,9 @@ class MatrixOIDCUser(MatrixUser):
     def load_users(environment, msg, **_kwargs):
         MatrixOIDCUser.worker_users = iter(msg.data)
         MatrixOIDCUser.worker_id = environment.runner.client_id
-        logging.info("Worker [%s] Received %s users", environment.runner.client_id, len(msg.data))
+        logging.info(
+            "Worker [%s] Received %s users", environment.runner.client_id, len(msg.data)
+        )
 
     @task
     def oidc_login(self):
@@ -65,29 +71,44 @@ class MatrixOIDCUser(MatrixUser):
             logging.error("Couldn't get username. Skipping...")
             return
 
-        if not hasattr(self.matrix_client, 'oidc_issuer') or self.matrix_client.oidc_issuer is None:
+        if (
+            not hasattr(self.matrix_client, "oidc_issuer")
+            or self.matrix_client.oidc_issuer is None
+        ):
             logging.error("No OIDC issuer configured. Skipping...")
             return
 
         # Log in as this current user if not already logged in
-        if self.matrix_client.user_id is None or self.matrix_client.access_token is None:
+        if (
+            self.matrix_client.user_id is None
+            or self.matrix_client.access_token is None
+        ):
             retries = 3
             while retries > 0:
                 # Use OIDC login instead of password-based login
                 response = self.matrix_client.login_oidc(
-                    self.matrix_client.oidc_issuer,
-                    self.matrix_client.oidc_client_id
+                    self.matrix_client.oidc_issuer, self.matrix_client.oidc_client_id
                 )
 
                 if isinstance(response, LoginError):
-                    logging.info("[%s] Could not login user with OIDC (attempt %d). Trying again...",
-                                 self.matrix_client.user, 4 - retries)
+                    logging.info(
+                        "[%s] Could not login user with OIDC (attempt %d). Trying again...",
+                        self.matrix_client.user,
+                        4 - retries,
+                    )
                     retries -= 1
                     continue
 
-                logging.info("[%s] Successfully logged in with OIDC", self.matrix_client.user)
+                logging.info(
+                    "[%s] Successfully logged in with OIDC", self.matrix_client.user
+                )
                 return
 
-            logging.error("Error logging in user %s with OIDC. Skipping...", self.matrix_client.user)
+            logging.error(
+                "Error logging in user %s with OIDC. Skipping...",
+                self.matrix_client.user,
+            )
         else:
-            logging.info("[%s] User already logged in with access token", self.matrix_client.user)
+            logging.info(
+                "[%s] User already logged in with access token", self.matrix_client.user
+            )

@@ -57,6 +57,7 @@ from nio.api import (
     _FilterT,
 )
 from nio.events import MegolmEvent
+
 # from nio.log import logger_group
 from nio.responses import (
     DeleteDevicesAuthResponse,
@@ -133,7 +134,9 @@ try:
     sys.path.append(os.path.join(os.path.dirname(__file__), "..", "bsspeke", "python"))
     from ..bsspeke.python import BSSpeke
 except ImportError:
-    logging.warning("Optional BSSpeke module not found. BSSpeke UIA stages will failif used.")
+    logging.warning(
+        "Optional BSSpeke module not found. BSSpeke UIA stages will failif used."
+    )
 
 from matrix_locust.nio.contrib import (
     ApiExt,
@@ -143,12 +146,14 @@ from matrix_locust.nio.contrib import (
     RoomSetTagsResponse,
 )
 
+
 @dataclass
 class ResponseCb:
     """Response callback."""
 
     func: Callable = field()
     filter: Union[Tuple[Type], Type, None] = None
+
 
 class LocustClient(Client):
     """Matrix no-IO client.
@@ -199,42 +204,46 @@ class LocustClient(Client):
         return_items = []
         for item in api_response:
             if nio.api.MATRIX_API_PATH in item:
-                return_items.append(item.replace(nio.api.MATRIX_API_PATH,
-                                                 "/_matrix/client/v3"))
+                return_items.append(
+                    item.replace(nio.api.MATRIX_API_PATH, "/_matrix/client/v3")
+                )
             elif nio.api.MATRIX_MEDIA_API_PATH in item:
-                return_items.append(item.replace(nio.api.MATRIX_MEDIA_API_PATH,
-                                                 "/_matrix/media/v3"))
+                return_items.append(
+                    item.replace(nio.api.MATRIX_MEDIA_API_PATH, "/_matrix/media/v3")
+                )
             else:
                 return_items.append(item)
 
         # Hacky way to allow unpacking a tuple return value
         return (*return_items,)
 
-    def _send(self,
-              response: Response,
-              method: str,
-              url: str,
-              body: str = None,
-              name: str = None,
-              *response_data,
+    def _send(
+        self,
+        response: Response,
+        method: str,
+        url: str,
+        body: str = None,
+        name: str = None,
+        *response_data,
     ):
-        headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
         if body is not None:
             body = json.loads(body)
 
         # Strip out url parameters from Locust logs
         if name is None and "?" in url:
-            name = url[:url.find("?")]
+            name = url[: url.find("?")]
 
         # Send request and update internal state of the object with the response
         # logging.info("[%s] Making API call to %s" % (self.user, url))
-        with self.locust_user.rest(method, url, headers=headers, json=body, name=name) as resp:
+        with self.locust_user.rest(
+            method, url, headers=headers, json=body, name=name
+        ) as resp:
             matrix_response = response.from_dict(resp.js, *response_data)
             self.receive_response(matrix_response)
             self.run_response_callbacks([matrix_response])
             return matrix_response
-
 
     def add_response_callback(
         self,
@@ -263,9 +272,7 @@ class LocustClient(Client):
         cb = ResponseCb(func, cb_filter)  # type: ignore
         self.response_callbacks.append(cb)
 
-    def run_response_callbacks(
-        self, responses: List[Union[Response, ErrorResponse]]
-    ):
+    def run_response_callbacks(self, responses: List[Union[Response, ErrorResponse]]):
         """Run the configured response callbacks for the given responses.
 
         Low-level function which is normally only used by other methods of
@@ -304,13 +311,15 @@ class LocustClient(Client):
         if password is None and token is None:
             raise ValueError("Either a password or a token needs to be provided")
 
-        method, path, data = self._build_request(Api.login(
-            self.user,
-            password=password,
-            device_name=device_name,
-            device_id=self.device_id,
-            token=token,
-        ))
+        method, path, data = self._build_request(
+            Api.login(
+                self.user,
+                password=password,
+                device_name=device_name,
+                device_id=self.device_id,
+                token=token,
+            )
+        )
 
         self.password = password
         response = self._send(LoginResponse, method, path, data)
@@ -327,7 +336,7 @@ class LocustClient(Client):
         device_name: Optional[str] = "",
         redirect_uri: str = "http://localhost:8080/callback",
         username: str = None,
-        password: str = None
+        password: str = None,
     ) -> Union[LoginResponse, LoginError]:
         """Login to the homeserver using real OIDC authentication.
 
@@ -351,27 +360,35 @@ class LocustClient(Client):
         try:
             # Get credentials from client attributes if not provided
             if username is None:
-                username = getattr(self, 'oidc_username', None)
+                username = getattr(self, "oidc_username", None)
             if password is None:
-                password = getattr(self, 'oidc_password', None)
+                password = getattr(self, "oidc_password", None)
 
             if not username or not password:
-                return LoginError("OIDC username/password not provided", status_code="M_OIDC_CREDENTIALS_MISSING")
+                return LoginError(
+                    "OIDC username/password not provided",
+                    status_code="M_OIDC_CREDENTIALS_MISSING",
+                )
 
             # Step 1: Get the Matrix SSO login URL
             login_token = self._perform_real_oidc_flow(username, password, redirect_uri)
 
             if not login_token:
-                return LoginError("Failed to obtain login token from OIDC flow", status_code="M_OIDC_TOKEN_MISSING")
+                return LoginError(
+                    "Failed to obtain login token from OIDC flow",
+                    status_code="M_OIDC_TOKEN_MISSING",
+                )
 
             # Step 2: Use the login token to authenticate with Matrix
-            method, path, data = self._build_request(Api.login(
-                self.user,
-                password=None,
-                device_name=device_name,
-                device_id=self.device_id,
-                token=login_token,
-            ))
+            method, path, data = self._build_request(
+                Api.login(
+                    self.user,
+                    password=None,
+                    device_name=device_name,
+                    device_id=self.device_id,
+                    token=login_token,
+                )
+            )
 
             response = self._send(LoginResponse, method, path, data)
 
@@ -381,9 +398,13 @@ class LocustClient(Client):
             return response
 
         except Exception as e:
-            return LoginError(f"OIDC authentication failed: {str(e)}", status_code="M_OIDC_ERROR")
+            return LoginError(
+                f"OIDC authentication failed: {str(e)}", status_code="M_OIDC_ERROR"
+            )
 
-    def _perform_real_oidc_flow(self, username: str, password: str, redirect_uri: str) -> Optional[str]:
+    def _perform_real_oidc_flow(
+        self, username: str, password: str, redirect_uri: str
+    ) -> Optional[str]:
         """Perform the actual OIDC authentication flow with NitroID.
 
         This method implements the real Matrix SSO + OIDC flow:
@@ -401,43 +422,49 @@ class LocustClient(Client):
             Login token from Matrix callback, or None if authentication failed
         """
         max_retries = 3
-        
+
         for attempt in range(max_retries):
             session = requests.Session()
             session.timeout = 30
-            
+
             # Configure session with proper headers to avoid bot detection
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive'
-            })
+            session.headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Connection": "keep-alive",
+                }
+            )
 
             try:
                 print(f"OIDC login attempt {attempt + 1}/{max_retries}")
-                
+
                 # Step 1: Get the Matrix SSO login URL
                 # Use the Matrix SSO redirect endpoint with NitroID IDP hint
                 matrix_base_url = f"{self.locust_user.host}"
                 sso_redirect_url = f"{matrix_base_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
 
                 # Add the redirect URI as a parameter
-                sso_params = {
-                    'redirectUrl': redirect_uri
-                }
+                sso_params = {"redirectUrl": redirect_uri}
 
                 # Step 2: Start the SSO flow - let requests handle redirects automatically
                 print(f"Starting SSO flow to {sso_redirect_url}")
-                response = session.get(sso_redirect_url, params=sso_params, allow_redirects=True)
+                response = session.get(
+                    sso_redirect_url, params=sso_params, allow_redirects=True
+                )
                 response.raise_for_status()
-                
-                print(f"Final page reached: {response.url} (status: {response.status_code})")
+
+                print(
+                    f"Final page reached: {response.url} (status: {response.status_code})"
+                )
 
                 # Step 3: We should now be at the NitroID login page
                 # Parse the login form and submit credentials
-                login_token = self._handle_nitroid_login(session, response, username, password, redirect_uri)
+                login_token = self._handle_nitroid_login(
+                    session, response, username, password, redirect_uri
+                )
 
                 if login_token:
                     return login_token
@@ -457,8 +484,14 @@ class LocustClient(Client):
 
         return None
 
-    def _handle_nitroid_login(self, session: requests.Session, response: requests.Response,
-                             username: str, password: str, redirect_uri: str) -> Optional[str]:
+    def _handle_nitroid_login(
+        self,
+        session: requests.Session,
+        response: requests.Response,
+        username: str,
+        password: str,
+        redirect_uri: str,
+    ) -> Optional[str]:
         """Handle the NitroID login form submission.
 
         Args:
@@ -473,106 +506,131 @@ class LocustClient(Client):
         """
         try:
             print(f"Parsing login page at: {response.url}")
-            print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
+            print(
+                f"Response content type: {response.headers.get('content-type', 'unknown')}"
+            )
             print(f"Response size: {len(response.text)} characters")
-            
+
             # Parse the login form from the NitroID page
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(response.text, "html.parser")
 
             # Find the login form - try multiple strategies
             login_form = None
-            
+
             # Strategy 1: Look for forms with login-related attributes
-            for form in soup.find_all('form'):
-                form_id = form.get('id', '').lower()
-                form_class = ' '.join(form.get('class', [])).lower()
-                form_action = form.get('action', '').lower()
-                
-                if any(keyword in form_id + form_class + form_action 
-                       for keyword in ['login', 'signin', 'auth', 'credential']):
+            for form in soup.find_all("form"):
+                form_id = form.get("id", "").lower()
+                form_class = " ".join(form.get("class", [])).lower()
+                form_action = form.get("action", "").lower()
+
+                if any(
+                    keyword in form_id + form_class + form_action
+                    for keyword in ["login", "signin", "auth", "credential"]
+                ):
                     login_form = form
-                    print(f"Found login form by attributes: id='{form.get('id')}', class='{form.get('class')}', action='{form.get('action')}'")
+                    print(
+                        f"Found login form by attributes: id='{form.get('id')}', class='{form.get('class')}', action='{form.get('action')}'"
+                    )
                     break
-            
+
             # Strategy 2: Look for forms with password fields
             if not login_form:
-                for form in soup.find_all('form'):
-                    if form.find('input', {'type': 'password'}):
+                for form in soup.find_all("form"):
+                    if form.find("input", {"type": "password"}):
                         login_form = form
-                        print(f"Found login form by password field: action='{form.get('action')}'")
+                        print(
+                            f"Found login form by password field: action='{form.get('action')}'"
+                        )
                         break
-            
+
             # Strategy 3: Use the first form as fallback
             if not login_form:
-                login_form = soup.find('form')
+                login_form = soup.find("form")
                 if login_form:
-                    print(f"Using first form as fallback: action='{login_form.get('action')}'")
-            
+                    print(
+                        f"Using first form as fallback: action='{login_form.get('action')}'"
+                    )
+
             if not login_form:
                 print("Could not find any login form on NitroID page")
                 print(f"Page title: {soup.title.string if soup.title else 'No title'}")
                 print(f"Available forms: {len(soup.find_all('form'))}")
                 print(f"Page preview: {response.text[:500]}...")
                 return None
-            
+
             print(f"Found login form with action: {login_form.get('action')}")
 
-            form_action = login_form.get('action')
-            if not form_action.startswith('http'):
+            form_action = login_form.get("action")
+            if not form_action.startswith("http"):
                 # Relative URL, make it absolute
                 base_url = f"{response.url.split('?')[0].rsplit('/', 1)[0]}"
                 form_action = f"{base_url}/{form_action.lstrip('/')}"
 
             # Extract any hidden form fields (CSRF tokens, etc.)
             form_data = {}
-            for input_field in login_form.find_all('input', {'type': 'hidden'}):
-                name = input_field.get('name')
-                value = input_field.get('value', '')
+            for input_field in login_form.find_all("input", {"type": "hidden"}):
+                name = input_field.get("name")
+                value = input_field.get("value", "")
                 if name:
                     form_data[name] = value
 
             # Add username and password fields
             # Common field names for username/email
-            username_fields = ['email', 'username', 'login', 'user']
-            password_fields = ['password', 'passwd', 'pwd']
+            username_fields = ["email", "username", "login", "user"]
+            password_fields = ["password", "passwd", "pwd"]
 
             # Find the actual field names from the form
             username_field_found = False
             password_field_found = False
-            
-            for input_field in login_form.find_all('input'):
-                field_type = input_field.get('type', '').lower()
-                field_name = input_field.get('name', '').lower()
-                field_id = input_field.get('id', '').lower()
-                field_placeholder = input_field.get('placeholder', '').lower()
+
+            for input_field in login_form.find_all("input"):
+                field_type = input_field.get("type", "").lower()
+                field_name = input_field.get("name", "").lower()
+                field_id = input_field.get("id", "").lower()
+                field_placeholder = input_field.get("placeholder", "").lower()
 
                 # Enhanced username field detection
-                if (field_type in ['email', 'text'] or 
-                    any(uf in field_name for uf in username_fields) or
-                    any(uf in field_id for uf in username_fields) or
-                    any(uf in field_placeholder for uf in ['email', 'username', 'user'])):
-                    form_data[input_field.get('name')] = username
+                if (
+                    field_type in ["email", "text"]
+                    or any(uf in field_name for uf in username_fields)
+                    or any(uf in field_id for uf in username_fields)
+                    or any(
+                        uf in field_placeholder for uf in ["email", "username", "user"]
+                    )
+                ):
+                    form_data[input_field.get("name")] = username
                     username_field_found = True
-                    print(f"Found username field: name='{input_field.get('name')}', type='{field_type}', placeholder='{input_field.get('placeholder', '')}'")
-                
-                # Enhanced password field detection  
-                elif (field_type == 'password' or
-                      any(pf in field_name for pf in password_fields) or
-                      any(pf in field_id for pf in password_fields) or
-                      'password' in field_placeholder):
-                    form_data[input_field.get('name')] = password
+                    print(
+                        f"Found username field: name='{input_field.get('name')}', type='{field_type}', placeholder='{input_field.get('placeholder', '')}'"
+                    )
+
+                # Enhanced password field detection
+                elif (
+                    field_type == "password"
+                    or any(pf in field_name for pf in password_fields)
+                    or any(pf in field_id for pf in password_fields)
+                    or "password" in field_placeholder
+                ):
+                    form_data[input_field.get("name")] = password
                     password_field_found = True
-                    print(f"Found password field: name='{input_field.get('name')}', type='{field_type}'")
-            
+                    print(
+                        f"Found password field: name='{input_field.get('name')}', type='{field_type}'"
+                    )
+
             if not username_field_found:
                 print("WARNING: Could not identify username field, trying fallback...")
                 # Fallback: look for any text input that's not hidden
-                for input_field in login_form.find_all('input'):
-                    if input_field.get('type', '').lower() in ['text', 'email', ''] and input_field.get('type', '').lower() != 'hidden':
-                        form_data[input_field.get('name')] = username
-                        print(f"Using fallback username field: {input_field.get('name')}")
+                for input_field in login_form.find_all("input"):
+                    if (
+                        input_field.get("type", "").lower() in ["text", "email", ""]
+                        and input_field.get("type", "").lower() != "hidden"
+                    ):
+                        form_data[input_field.get("name")] = username
+                        print(
+                            f"Using fallback username field: {input_field.get('name')}"
+                        )
                         break
-                        
+
             if not password_field_found:
                 print("WARNING: Could not identify password field")
                 # This is more critical - we should see a password field
@@ -581,7 +639,9 @@ class LocustClient(Client):
             print(f"Form data keys: {list(form_data.keys())}")
 
             # Submit the login form
-            login_response = session.post(form_action, data=form_data, allow_redirects=True)
+            login_response = session.post(
+                form_action, data=form_data, allow_redirects=True
+            )
             login_response.raise_for_status()
 
             # Step 4: Follow redirects to get back to Matrix with login token
@@ -594,30 +654,30 @@ class LocustClient(Client):
             query_params = urllib.parse.parse_qs(parsed_url.query)
 
             login_token = None
-            
+
             # Strategy 1: Check URL parameters
-            if 'loginToken' in query_params:
-                login_token = query_params['loginToken'][0]
+            if "loginToken" in query_params:
+                login_token = query_params["loginToken"][0]
                 print(f"Found login token in URL parameters")
-            
-            # Strategy 2: Check for common token parameter variations  
-            elif 'token' in query_params:
-                login_token = query_params['token'][0]
+
+            # Strategy 2: Check for common token parameter variations
+            elif "token" in query_params:
+                login_token = query_params["token"][0]
                 print(f"Found token in URL parameters")
-            elif 'access_token' in query_params:
-                login_token = query_params['access_token'][0]  
+            elif "access_token" in query_params:
+                login_token = query_params["access_token"][0]
                 print(f"Found access_token in URL parameters")
-            
+
             # Strategy 3: Check response headers
             if not login_token:
-                auth_header = login_response.headers.get('Authorization', '')
-                if auth_header.startswith('Bearer '):
+                auth_header = login_response.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
                     login_token = auth_header[7:]
                     print(f"Found token in Authorization header")
-                elif 'X-Login-Token' in login_response.headers:
-                    login_token = login_response.headers['X-Login-Token']
+                elif "X-Login-Token" in login_response.headers:
+                    login_token = login_response.headers["X-Login-Token"]
                     print(f"Found token in X-Login-Token header")
-            
+
             # Strategy 4: Check response body with multiple patterns
             if not login_token:
                 patterns = [
@@ -627,23 +687,31 @@ class LocustClient(Client):
                     r'["\']loginToken["\']\s*:\s*["\']([^"\']+)',
                     r'window\.location\.href\s*=\s*["\'][^"\']*[?&]loginToken=([^"\'&]+)',
                 ]
-                
+
                 for pattern in patterns:
                     token_match = re.search(pattern, login_response.text, re.IGNORECASE)
                     if token_match:
                         login_token = token_match.group(1)
-                        print(f"Found token in response body using pattern: {pattern[:30]}...")
+                        print(
+                            f"Found token in response body using pattern: {pattern[:30]}..."
+                        )
                         break
-            
+
             # Strategy 5: Look for JavaScript redirects or meta refresh
             if not login_token:
                 # Check for meta refresh with token
-                meta_match = re.search(r'<meta[^>]+refresh[^>]+url=([^"\'>\s]+)', login_response.text, re.IGNORECASE)
+                meta_match = re.search(
+                    r'<meta[^>]+refresh[^>]+url=([^"\'>\s]+)',
+                    login_response.text,
+                    re.IGNORECASE,
+                )
                 if meta_match:
                     redirect_url = meta_match.group(1)
-                    redirect_params = urllib.parse.parse_qs(urllib.parse.urlparse(redirect_url).query)
-                    if 'loginToken' in redirect_params:
-                        login_token = redirect_params['loginToken'][0]
+                    redirect_params = urllib.parse.parse_qs(
+                        urllib.parse.urlparse(redirect_url).query
+                    )
+                    if "loginToken" in redirect_params:
+                        login_token = redirect_params["loginToken"][0]
                         print(f"Found token in meta refresh redirect")
 
             if login_token:
@@ -662,9 +730,7 @@ class LocustClient(Client):
             return None
 
     @logged_in
-    def logout(
-        self, all_devices: bool = False
-    ) -> Union[LogoutResponse, LogoutError]:
+    def logout(self, all_devices: bool = False) -> Union[LogoutResponse, LogoutError]:
         """Logout from the homeserver.
 
         Calls receive_response() to update the client state if necessary.
@@ -672,7 +738,9 @@ class LocustClient(Client):
         Returns either 'LogoutResponse' if the request was successful or
         a `Logouterror` if there was an error with the request.
         """
-        method, path, data = self._build_request(Api.logout(self.access_token, all_devices))
+        method, path, data = self._build_request(
+            Api.logout(self.access_token, all_devices)
+        )
 
         response = self._send(LogoutResponse, method, path, data)
 
@@ -684,11 +752,11 @@ class LocustClient(Client):
         return response
 
     def register(
-            self,
-            username,
-            password,
-            device_name: Optional[str] = "",
-            token: Optional[str] = ""
+        self,
+        username,
+        password,
+        device_name: Optional[str] = "",
+        token: Optional[str] = "",
     ):
         """Register with homeserver.
 
@@ -704,38 +772,51 @@ class LocustClient(Client):
 
         Returns a 'RegisterResponse' if successful.
         """
-        method, path, data = self._build_request(Api.register(
-            user=username,
-            password=password,
-            device_name=device_name,
-            device_id=self.device_id,
-        ))
+        method, path, data = self._build_request(
+            Api.register(
+                user=username,
+                password=password,
+                device_name=device_name,
+                device_id=self.device_id,
+            )
+        )
 
         data = json.loads(data)
 
         with self.locust_user.rest(method, path, json=data) as response1:
-            if response1.status_code == HTTPStatus.OK: #200
+            if response1.status_code == HTTPStatus.OK:  # 200
                 logging.info("User [%s] Success!  Didn't even need UIAA!", self.user)
                 self.user_id = response1.js.get("user_id", None)
                 self.access_token = response1.js.get("access_token", None)
                 self.matrix_domain = self.user_id.split(":")[-1]
                 if self.user_id is None or self.access_token is None:
-                    logging.error("User [%s] Failed to parse /register response!\nResponse: %s", self.user, response1.js)
+                    logging.error(
+                        "User [%s] Failed to parse /register response!\nResponse: %s",
+                        self.user,
+                        response1.js,
+                    )
                     return
                 self.locust_user.update_tokens()
-            elif response1.status_code == HTTPStatus.UNAUTHORIZED: #401
+            elif response1.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 # Not an error, unauthorized requests are apart of the registration-flow
                 response1.success()
 
                 flows = response1.js.get("flows", None)
                 if flows is None:
-                    logging.error("User [%s] No UIAA flows for /register\nResponse: %s", self.user, response1.js)
+                    logging.error(
+                        "User [%s] No UIAA flows for /register\nResponse: %s",
+                        self.user,
+                        response1.js,
+                    )
                     self.locust_user.environment.runner.quit()
                     return
 
                 session_id = response1.js.get("session", None)
                 if session_id is None:
-                    logging.info("User [%s] No session ID provided by server for /register", self.user)
+                    logging.info(
+                        "User [%s] No session ID provided by server for /register",
+                        self.user,
+                    )
                 else:
                     data["auth"]["session"] = session_id
 
@@ -757,39 +838,58 @@ class LocustClient(Client):
                             elif stage == "m.login.registration_token":
                                 data["auth"]["token"] = token
 
-                            with self.locust_user.rest("POST", path, json=data) as response2:
+                            with self.locust_user.rest(
+                                "POST", path, json=data
+                            ) as response2:
                                 print(response2.js)
-                                if response2.status_code == HTTPStatus.OK or response2.status_code == HTTPStatus.CREATED: # 200 or 201
+                                if (
+                                    response2.status_code == HTTPStatus.OK
+                                    or response2.status_code == HTTPStatus.CREATED
+                                ):  # 200 or 201
                                     logging.info("User [%s] Success!", self.user)
                                     self.user_id = response2.js.get("user_id", None)
-                                    self.access_token = response2.js.get("access_token", None)
+                                    self.access_token = response2.js.get(
+                                        "access_token", None
+                                    )
                                     self.matrix_domain = self.user_id.split(":")[-1]
-                                    if self.user_id is None or self.access_token is None:
-                                        logging.error("User [%s] Failed to parse /register response!\nResponse: %s", self.user,
-                                                    response2.js)
+                                    if (
+                                        self.user_id is None
+                                        or self.access_token is None
+                                    ):
+                                        logging.error(
+                                            "User [%s] Failed to parse /register response!\nResponse: %s",
+                                            self.user,
+                                            response2.js,
+                                        )
                                         return
                                     self.locust_user.update_tokens()
                                     return
-                                elif response2.status_code == HTTPStatus.UNAUTHORIZED: #401
+                                elif (
+                                    response2.status_code == HTTPStatus.UNAUTHORIZED
+                                ):  # 401
                                     continue
                                 else:
-                                    logging.error("User[%s] /register failed with status code %d\nResponse: %s", self.user,
-                                            response2.status_code, response2.js)
+                                    logging.error(
+                                        "User[%s] /register failed with status code %d\nResponse: %s",
+                                        self.user,
+                                        response2.status_code,
+                                        response2.js,
+                                    )
                                     break
             else:
-                logging.error("User[%s] /register failed with status code %d\nResponse: %s", self.user,
-                            response1.status_code, response1.js)
+                logging.error(
+                    "User[%s] /register failed with status code %d\nResponse: %s",
+                    self.user,
+                    response1.status_code,
+                    response1.js,
+                )
 
-
-        #return await self._send(RegisterResponse, method, path, data)
+        # return await self._send(RegisterResponse, method, path, data)
 
     def register_uia(self) -> None:
         """TODO: Update to make this a generic UIA handler that calls callbacks depending on stages
         rather than being circles flow specific"""
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         path = "/_matrix/client/v3/register"
         url = self.locust_user.host + path
         session_id = ""
@@ -802,14 +902,15 @@ class LocustClient(Client):
         client_id = client.get_client_id()
         blind = client.generate_blind()
 
-
         # Request 1: Empty #####################################################
-        with self.locust_user.client.request("POST", url, headers=headers, json={}, catch_response=True) as r1:
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json={}, catch_response=True
+        ) as r1:
             initial_json = r1.json()
             session_id = r1.json().get("session", None)
 
             # print("Got response: ", json.dumps(r1.js, indent=4))
-            if r1.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r1.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r1.success()
             else:
                 error = r1.json().get("error", "???")
@@ -820,16 +921,15 @@ class LocustClient(Client):
         # Request 3: Terms of service ##########################################
         body = {
             "username": self.user,
-            "auth": {
-                "type": "m.login.terms",
-                "session": session_id
-            }
+            "auth": {"type": "m.login.terms", "session": session_id},
         }
-        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json=body, catch_response=True
+        ) as r3:
             completed = r3.json().get("completed", [])
 
             # print("Got response: ", json.dumps(r3.js, indent=4))
-            if r3.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r3.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r3.success()
             else:
                 error = r3.json().get("error", "???")
@@ -842,14 +942,16 @@ class LocustClient(Client):
             "auth": {
                 "type": "m.enroll.username",
                 "session": session_id,
-                "username": self.user
+                "username": self.user,
             }
         }
-        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r4:
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json=body, catch_response=True
+        ) as r4:
             completed = r4.json().get("completed", [])
 
             # print("Got response: ", json.dumps(r4.js, indent=4))
-            if r4.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r4.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r4.success()
             else:
                 error = r4.json().get("error", "???")
@@ -860,23 +962,25 @@ class LocustClient(Client):
         # Request 6: BS-SPEKE OPRF
         oprf_params = initial_json["params"]["m.enroll.bsspeke-ecc.oprf"]
         curve = oprf_params["curve"]
-        blind_base64 = binascii.b2a_base64(blind, newline=False).decode('utf-8')
+        blind_base64 = binascii.b2a_base64(blind, newline=False).decode("utf-8")
 
         body = {
             "auth": {
                 "type": "m.enroll.bsspeke-ecc.oprf",
                 "curve": curve,
                 "blind": blind_base64,
-                "session": session_id
+                "session": session_id,
             }
         }
         bs_speke_params = None
-        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r6:
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json=body, catch_response=True
+        ) as r6:
             bs_speke_params = r6.json()
             completed = r6.json().get("completed", [])
             r6_params = r6.json().get("params", {})
 
-            if r6.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r6.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r6.success()
             else:
                 error = r6.json().get("error", "???")
@@ -888,22 +992,18 @@ class LocustClient(Client):
         # Request 7: BS-SPEKE Save
         save_params = bs_speke_params["params"]["m.enroll.bsspeke-ecc.save"]
         blind_salt = save_params["blind_salt"]
-        phf_params = {
-            "name": "argon2i",
-            "iterations": 3,
-            "blocks": 100000
-        }
-        P,V = client.generate_P_and_V(base64.b64decode(blind_salt), phf_params)
+        phf_params = {"name": "argon2i", "iterations": 3, "blocks": 100000}
+        P, V = client.generate_P_and_V(base64.b64decode(blind_salt), phf_params)
 
         body = {
             "username": self.user,
             "auth": {
                 "type": "m.enroll.bsspeke-ecc.save",
-                "P": binascii.b2a_base64(P, newline=False).decode('utf-8'),
-                "V": binascii.b2a_base64(V, newline=False).decode('utf-8'),
+                "P": binascii.b2a_base64(P, newline=False).decode("utf-8"),
+                "V": binascii.b2a_base64(V, newline=False).decode("utf-8"),
                 "phf_params": phf_params,
-                "session": session_id
-            }
+                "session": session_id,
+            },
         }
         # with self.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
         with self.locust_user.rest("POST", url, headers=headers, json=body) as r7:
@@ -919,15 +1019,10 @@ class LocustClient(Client):
             self.matrix_domain = self.user_id.split(":")[-1]
             self.device_id = r7.js.get("device_id", None)
 
-
-
     def login_uia(self) -> None:
         """TODO: Update to make this a generic UIA handler that calls callbacks depending on stages
         rather than being circles flow specific"""
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         path = "/_matrix/client/v3/login"
         url = self.locust_user.host + path
         session_id = ""
@@ -941,18 +1036,15 @@ class LocustClient(Client):
         blind = client.generate_blind()
 
         # Request 1: Empty #####################################################
-        body = {
-            "identifier": {
-                "type": "m.id.user",
-                "user": self.user_id
-            }
-        }
-        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r1:
+        body = {"identifier": {"type": "m.id.user", "user": self.user_id}}
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json=body, catch_response=True
+        ) as r1:
             initial_json = r1.json()
             session_id = r1.json().get("session", None)
 
             # print("Got response: ", json.dumps(r1.js, indent=4))
-            if r1.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r1.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r1.success()
             else:
                 error = r1.json().get("error", "???")
@@ -964,26 +1056,25 @@ class LocustClient(Client):
         oprf_params = initial_json["params"]["m.login.bsspeke-ecc.oprf"]
         curve = oprf_params["curve"]
         phf_params = oprf_params["phf_params"]
-        blind_base64 = binascii.b2a_base64(blind, newline=False).decode('utf-8')
+        blind_base64 = binascii.b2a_base64(blind, newline=False).decode("utf-8")
 
         body = {
-            "identifier": {
-                "type": "m.id.user",
-                "user": self.user_id
-            },
+            "identifier": {"type": "m.id.user", "user": self.user_id},
             "auth": {
                 "type": "m.login.bsspeke-ecc.oprf",
                 "curve": curve,
                 "blind": blind_base64,
-                "session": session_id
-            }
+                "session": session_id,
+            },
         }
         r2_params = None
-        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r2:
+        with self.locust_user.client.request(
+            "POST", url, headers=headers, json=body, catch_response=True
+        ) as r2:
             completed = r2.json().get("completed", [])
             r2_params = r2.json().get("params", {})
 
-            if r2.status_code == HTTPStatus.UNAUTHORIZED: #401
+            if r2.status_code == HTTPStatus.UNAUTHORIZED:  # 401
                 r2.success()
             else:
                 error = r2.json().get("error", "???")
@@ -991,37 +1082,33 @@ class LocustClient(Client):
                 print(f"Got error response: {errcode} {error}")
                 return
 
-
         # Request 3: BS-SPEKE Verify
         verify_params = r2_params["m.login.bsspeke-ecc.verify"]
         blind_salt_str = verify_params["blind_salt"]
         B_str = verify_params["B"]
         blind_salt = base64.b64decode(blind_salt_str)
         B = base64.b64decode(B_str)
-        B_hex = binascii.b2a_hex(B).decode('utf-8')
+        B_hex = binascii.b2a_hex(B).decode("utf-8")
 
         A_bytes = client.generate_A(blind_salt, phf_params)
         client.derive_shared_key(B)
         verifier_bytes = client.generate_verifier()
 
-        A = binascii.b2a_base64(A_bytes, newline=False).decode('utf-8')
-        A_hex = binascii.b2a_hex(A_bytes).decode('utf-8')
-        verifier = binascii.b2a_base64(verifier_bytes, newline=False).decode('utf-8')
+        A = binascii.b2a_base64(A_bytes, newline=False).decode("utf-8")
+        A_hex = binascii.b2a_hex(A_bytes).decode("utf-8")
+        verifier = binascii.b2a_base64(verifier_bytes, newline=False).decode("utf-8")
 
         body = {
-            "identifier": {
-                "type": "m.id.user",
-                "user": self.user_id
-            },
+            "identifier": {"type": "m.id.user", "user": self.user_id},
             "auth": {
                 "type": "m.login.bsspeke-ecc.verify",
                 "A": A,
                 "verifier": verifier,
-                "session": session_id
-            }
+                "session": session_id,
+            },
         }
         with self.locust_user.rest("POST", url, headers=headers, json=body) as r3:
-        # with self.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
+            # with self.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
             completed = r3.js.get("completed", [])
             if r3.status_code != 200:
                 error = r3.js.get("error", "???")
@@ -1030,13 +1117,10 @@ class LocustClient(Client):
                 return
             print("Login success - Got response: ", json.dumps(r3.js, indent=4))
 
-
             self.user_id = r3.js.get("user_id", None)
             self.access_token = r3.js.get("access_token", None)
             self.matrix_domain = self.user_id.split(":")[-1]
             self.device_id = r3.js.get("device_id", None)
-
-
 
     @logged_in
     def room_send(
@@ -1111,9 +1195,9 @@ class LocustClient(Client):
         #             # Encrypt our content and change the message type.
         #             message_type, content = self.encrypt(room_id, message_type, content)
 
-        method, path, data = self._build_request(Api.room_send(
-            self.access_token, room_id, message_type, content, uuid
-        ))
+        method, path, data = self._build_request(
+            Api.room_send(self.access_token, room_id, message_type, content, uuid)
+        )
         label = f"/_matrix/client/v3/rooms/_/send/{message_type}/_"
         return self._send(RoomSendResponse, method, path, data, label, (room_id,))
 
@@ -1196,7 +1280,8 @@ class LocustClient(Client):
         )
 
         label = f"/_matrix/client/v3/rooms/_/state/{event_type}/_"
-        return self._send(RoomGetStateEventResponse,
+        return self._send(
+            RoomGetStateEventResponse,
             method,
             path,
             None,
@@ -1288,22 +1373,24 @@ class LocustClient(Client):
             space (bool): Create as a Space (defaults to False).
         """
 
-        method, path, data = self._build_request(Api.room_create(
-            self.access_token,
-            visibility=visibility,
-            alias=alias,
-            name=name,
-            topic=topic,
-            room_version=room_version,
-            federate=federate,
-            is_direct=is_direct,
-            preset=preset,
-            invite=invite,
-            initial_state=initial_state,
-            power_level_override=power_level_override,
-            predecessor=predecessor,
-            space=space,
-        ))
+        method, path, data = self._build_request(
+            Api.room_create(
+                self.access_token,
+                visibility=visibility,
+                alias=alias,
+                name=name,
+                topic=topic,
+                room_version=room_version,
+                federate=federate,
+                is_direct=is_direct,
+                preset=preset,
+                invite=invite,
+                initial_state=initial_state,
+                power_level_override=power_level_override,
+                predecessor=predecessor,
+                space=space,
+            )
+        )
 
         return self._send(RoomCreateResponse, method, path, body=data)
 
@@ -1372,15 +1459,17 @@ class LocustClient(Client):
 
 
         """
-        method, path = self._build_request(Api.room_messages(
-            self.access_token,
-            room_id,
-            start,
-            end=end,
-            direction=direction,
-            limit=limit,
-            message_filter=message_filter,
-        ))
+        method, path = self._build_request(
+            Api.room_messages(
+                self.access_token,
+                room_id,
+                start,
+                end=end,
+                direction=direction,
+                limit=limit,
+                message_filter=message_filter,
+            )
+        )
 
         label = "/_matrix/client/v3/rooms/_/messages"
         return self._send(RoomMessagesResponse, method, path, None, label, (room_id,))
@@ -1409,9 +1498,11 @@ class LocustClient(Client):
             timeout (int): For how long should the new typing notice be
                 valid for in milliseconds.
         """
-        method, path, data = self._build_request(Api.room_typing(
-            self.access_token, room_id, self.user_id, typing_state, timeout
-        ))
+        method, path, data = self._build_request(
+            Api.room_typing(
+                self.access_token, room_id, self.user_id, typing_state, timeout
+            )
+        )
         label = "/_matrix/client/v3/rooms/_/typing/_"
         return self._send(RoomTypingResponse, method, path, data, label, (room_id,))
 
@@ -1421,9 +1512,9 @@ class LocustClient(Client):
         room_id: str,
     ) -> Tuple[RoomGetTagsResponse, RoomGetTagsError]:
 
-        method, path, data = self._build_request(ApiExt.get_tags(
-            self.access_token, self.user_id, room_id
-        ))
+        method, path, data = self._build_request(
+            ApiExt.get_tags(self.access_token, self.user_id, room_id)
+        )
 
         label = "/_matrix/client/v3/user/_/rooms/_/tags"
         return self._send(RoomGetTagsResponse, method, path, data, label)
@@ -1436,13 +1527,12 @@ class LocustClient(Client):
         order: float = None,
     ) -> Tuple[RoomSetTagsResponse, RoomSetTagsError]:
 
-        method, path, data = self._build_request(ApiExt.set_tags(
-            self.access_token, self.user_id, room_id, tag, order
-        ))
+        method, path, data = self._build_request(
+            ApiExt.set_tags(self.access_token, self.user_id, room_id, tag, order)
+        )
 
         label = "/_matrix/client/v3/user/_/rooms/_/tags"
         return self._send(RoomSetTagsResponse, method, path, data, label)
-
 
     @logged_in
     def update_receipt_marker(
@@ -1466,12 +1556,14 @@ class LocustClient(Client):
             receipt_type (str): The type of receipt to send. Currently, only
                 `m.read` is supported by the Matrix specification.
         """
-        method, path = self._build_request(Api.update_receipt_marker(
-            self.access_token,
-            room_id,
-            event_id,
-            receipt_type,
-        ))
+        method, path = self._build_request(
+            Api.update_receipt_marker(
+                self.access_token,
+                room_id,
+                event_id,
+                receipt_type,
+            )
+        )
 
         label = "/_matrix/client/v3/rooms/_/receipt/m.read/_"
         return self._send(UpdateReceiptMarkerResponse, method, path, "{}", label)
@@ -1493,16 +1585,18 @@ class LocustClient(Client):
         Args:
             user_id (str): User id of the user to get the display name for.
         """
-        method, path = self._build_request(Api.profile_get_displayname(
-            user_id or self.user_id, access_token=self.access_token or None
-        ))
+        method, path = self._build_request(
+            Api.profile_get_displayname(
+                user_id or self.user_id, access_token=self.access_token or None
+            )
+        )
 
         label = "/_matrix/client/v3/profile/_/displayname"
         return self._send(ProfileGetDisplayNameResponse, method, path, None, label)
 
     @logged_in
-    def set_displayname(self,
-                        displayname: str
+    def set_displayname(
+        self, displayname: str
     ) -> Union[ProfileSetDisplayNameResponse, ProfileSetDisplayNameError]:
         """Set user's display name.
 
@@ -1518,9 +1612,9 @@ class LocustClient(Client):
         Args:
             displayname (str): Display name to set.
         """
-        method, path, data = self._build_request(Api.profile_set_displayname(
-            self.access_token, self.user_id, displayname
-        ))
+        method, path, data = self._build_request(
+            Api.profile_set_displayname(self.access_token, self.user_id, displayname)
+        )
 
         label = "/_matrix/client/v3/profile/_/displayname"
         return self._send(ProfileSetDisplayNameResponse, method, path, data, label)
@@ -1542,9 +1636,11 @@ class LocustClient(Client):
         Args:
             user_id (str): User id of the user to get the avatar for.
         """
-        method, path = self._build_request(Api.profile_get_avatar(
-            user_id or self.user_id, access_token=self.access_token or None
-        ))
+        method, path = self._build_request(
+            Api.profile_get_avatar(
+                user_id or self.user_id, access_token=self.access_token or None
+            )
+        )
 
         label = "/_matrix/client/v3/profile/_/avatar_url"
         return self._send(ProfileGetAvatarResponse, method, path, None, label)
@@ -1567,9 +1663,9 @@ class LocustClient(Client):
         Args:
             avatar_url (str): matrix content URI of the avatar to set.
         """
-        method, path, data = self._build_request(Api.profile_set_avatar(
-            self.access_token, self.user_id, avatar_url
-        ))
+        method, path, data = self._build_request(
+            Api.profile_set_avatar(self.access_token, self.user_id, avatar_url)
+        )
 
         label = "/_matrix/client/v3/profile/_/avatar_url"
         return self._send(ProfileSetAvatarResponse, method, path, data, label)
@@ -1583,7 +1679,7 @@ class LocustClient(Client):
         full_state: Optional[bool] = None,
         set_presence: Optional[str] = None,
     ) -> Union[SyncResponse, SyncError]:
-    # tbd update docstr (also decide on _filterT???)
+        # tbd update docstr (also decide on _filterT???)
         """Synchronize the client's state with the latest state on the server.
 
         In general you should use sync_forever() which handles additional
@@ -1620,15 +1716,17 @@ class LocustClient(Client):
         """
 
         sync_token = since or self.next_batch
-        presence = set_presence #or self._presence
-        method, path = self._build_request(Api.sync(
-            self.access_token,
-            since=sync_token or self.loaded_sync_token,
-            timeout=timeout or None,
-            filter=sync_filter,
-            full_state=full_state,
-            set_presence=presence,
-        ))
+        presence = set_presence  # or self._presence
+        method, path = self._build_request(
+            Api.sync(
+                self.access_token,
+                since=sync_token or self.loaded_sync_token,
+                timeout=timeout or None,
+                filter=sync_filter,
+                full_state=full_state,
+                set_presence=presence,
+            )
+        )
 
         # response = await self._send(
         #     SyncResponse,
