@@ -10,6 +10,9 @@ Usage:
     poetry run python test_real_oidc_browser.py
 """
 
+from gevent import monkey
+monkey.patch_all()
+
 import json
 import logging
 import os
