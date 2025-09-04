@@ -400,50 +400,62 @@ class LocustClient(Client):
         Returns:
             Login token from Matrix callback, or None if authentication failed
         """
-        session = requests.Session()
-        session.timeout = 30
-
-        try:
-            # Step 1: Get the Matrix SSO login URL
-            # Use the Matrix SSO redirect endpoint with NitroID IDP hint
-            matrix_base_url = f"{self.locust_user.host}"
-            sso_redirect_url = f"{matrix_base_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
-
-            # Add the redirect URI as a parameter
-            sso_params = {
-                'redirectUrl': redirect_uri
-            }
-
-            # Step 2: Start the SSO flow - this will redirect to NitroID
-            print(f"Starting SSO flow to {sso_redirect_url}")
-            response = session.get(sso_redirect_url, params=sso_params, allow_redirects=False)
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            session = requests.Session()
+            session.timeout = 30
             
-            # Follow redirects manually with limit to prevent infinite loops
-            redirect_count = 0
-            max_redirects = 10
-            
-            while response.status_code in [301, 302, 303, 307, 308] and redirect_count < max_redirects:
-                redirect_url = response.headers.get('Location')
-                print(f"Redirect {redirect_count + 1}: {response.status_code} -> {redirect_url}")
-                response = session.get(redirect_url, allow_redirects=False)
-                redirect_count += 1
-            
-            if redirect_count >= max_redirects:
-                print(f"Maximum redirects ({max_redirects}) reached. Final URL: {response.url}")
-                return None
+            # Configure session with proper headers to avoid bot detection
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive'
+            })
+
+            try:
+                print(f"OIDC login attempt {attempt + 1}/{max_retries}")
                 
-            response.raise_for_status()
-            print(f"Final page reached: {response.url} (status: {response.status_code})")
+                # Step 1: Get the Matrix SSO login URL
+                # Use the Matrix SSO redirect endpoint with NitroID IDP hint
+                matrix_base_url = f"{self.locust_user.host}"
+                sso_redirect_url = f"{matrix_base_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
 
-            # Step 3: We should now be at the NitroID login page
-            # Parse the login form and submit credentials
-            login_token = self._handle_nitroid_login(session, response, username, password, redirect_uri)
+                # Add the redirect URI as a parameter
+                sso_params = {
+                    'redirectUrl': redirect_uri
+                }
 
-            return login_token
+                # Step 2: Start the SSO flow - let requests handle redirects automatically
+                print(f"Starting SSO flow to {sso_redirect_url}")
+                response = session.get(sso_redirect_url, params=sso_params, allow_redirects=True)
+                response.raise_for_status()
+                
+                print(f"Final page reached: {response.url} (status: {response.status_code})")
 
-        except Exception as e:
-            print(f"OIDC flow failed: {str(e)}")
-            return None
+                # Step 3: We should now be at the NitroID login page
+                # Parse the login form and submit credentials
+                login_token = self._handle_nitroid_login(session, response, username, password, redirect_uri)
+
+                if login_token:
+                    return login_token
+                else:
+                    print(f"Attempt {attempt + 1} failed to get login token")
+
+            except Exception as e:
+                print(f"Attempt {attempt + 1} failed with exception: {str(e)}")
+                if attempt == max_retries - 1:
+                    print(f"All {max_retries} attempts failed")
+                    return None
+                else:
+                    print(f"Retrying in 2 seconds...")
+                    time.sleep(2)
+            finally:
+                session.close()
+
+        return None
 
     def _handle_nitroid_login(self, session: requests.Session, response: requests.Response,
                              username: str, password: str, redirect_uri: str) -> Optional[str]:
@@ -467,11 +479,39 @@ class LocustClient(Client):
             # Parse the login form from the NitroID page
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Find the login form
-            login_form = soup.find('form')
+            # Find the login form - try multiple strategies
+            login_form = None
+            
+            # Strategy 1: Look for forms with login-related attributes
+            for form in soup.find_all('form'):
+                form_id = form.get('id', '').lower()
+                form_class = ' '.join(form.get('class', [])).lower()
+                form_action = form.get('action', '').lower()
+                
+                if any(keyword in form_id + form_class + form_action 
+                       for keyword in ['login', 'signin', 'auth', 'credential']):
+                    login_form = form
+                    print(f"Found login form by attributes: id='{form.get('id')}', class='{form.get('class')}', action='{form.get('action')}'")
+                    break
+            
+            # Strategy 2: Look for forms with password fields
             if not login_form:
-                print("Could not find login form on NitroID page")
+                for form in soup.find_all('form'):
+                    if form.find('input', {'type': 'password'}):
+                        login_form = form
+                        print(f"Found login form by password field: action='{form.get('action')}'")
+                        break
+            
+            # Strategy 3: Use the first form as fallback
+            if not login_form:
+                login_form = soup.find('form')
+                if login_form:
+                    print(f"Using first form as fallback: action='{login_form.get('action')}'")
+            
+            if not login_form:
+                print("Could not find any login form on NitroID page")
                 print(f"Page title: {soup.title.string if soup.title else 'No title'}")
+                print(f"Available forms: {len(soup.find_all('form'))}")
                 print(f"Page preview: {response.text[:500]}...")
                 return None
             
@@ -497,14 +537,45 @@ class LocustClient(Client):
             password_fields = ['password', 'passwd', 'pwd']
 
             # Find the actual field names from the form
+            username_field_found = False
+            password_field_found = False
+            
             for input_field in login_form.find_all('input'):
                 field_type = input_field.get('type', '').lower()
                 field_name = input_field.get('name', '').lower()
+                field_id = input_field.get('id', '').lower()
+                field_placeholder = input_field.get('placeholder', '').lower()
 
-                if field_type in ['email', 'text'] or any(uf in field_name for uf in username_fields):
+                # Enhanced username field detection
+                if (field_type in ['email', 'text'] or 
+                    any(uf in field_name for uf in username_fields) or
+                    any(uf in field_id for uf in username_fields) or
+                    any(uf in field_placeholder for uf in ['email', 'username', 'user'])):
                     form_data[input_field.get('name')] = username
-                elif field_type == 'password' or any(pf in field_name for pf in password_fields):
+                    username_field_found = True
+                    print(f"Found username field: name='{input_field.get('name')}', type='{field_type}', placeholder='{input_field.get('placeholder', '')}'")
+                
+                # Enhanced password field detection  
+                elif (field_type == 'password' or
+                      any(pf in field_name for pf in password_fields) or
+                      any(pf in field_id for pf in password_fields) or
+                      'password' in field_placeholder):
                     form_data[input_field.get('name')] = password
+                    password_field_found = True
+                    print(f"Found password field: name='{input_field.get('name')}', type='{field_type}'")
+            
+            if not username_field_found:
+                print("WARNING: Could not identify username field, trying fallback...")
+                # Fallback: look for any text input that's not hidden
+                for input_field in login_form.find_all('input'):
+                    if input_field.get('type', '').lower() in ['text', 'email', ''] and input_field.get('type', '').lower() != 'hidden':
+                        form_data[input_field.get('name')] = username
+                        print(f"Using fallback username field: {input_field.get('name')}")
+                        break
+                        
+            if not password_field_found:
+                print("WARNING: Could not identify password field")
+                # This is more critical - we should see a password field
 
             print(f"Submitting login form to {form_action}")
             print(f"Form data keys: {list(form_data.keys())}")
@@ -518,19 +589,62 @@ class LocustClient(Client):
             final_url = login_response.url
             print(f"Final redirect URL: {final_url}")
 
-            # Extract login token from the callback URL
-            # Look for loginToken parameter in URL or in the response
+            # Extract login token from the callback URL and response
             parsed_url = urllib.parse.urlparse(final_url)
             query_params = urllib.parse.parse_qs(parsed_url.query)
 
             login_token = None
+            
+            # Strategy 1: Check URL parameters
             if 'loginToken' in query_params:
                 login_token = query_params['loginToken'][0]
-            else:
-                # Also check the response body for the token
-                token_match = re.search(r'loginToken["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', login_response.text)
-                if token_match:
-                    login_token = token_match.group(1)
+                print(f"Found login token in URL parameters")
+            
+            # Strategy 2: Check for common token parameter variations  
+            elif 'token' in query_params:
+                login_token = query_params['token'][0]
+                print(f"Found token in URL parameters")
+            elif 'access_token' in query_params:
+                login_token = query_params['access_token'][0]  
+                print(f"Found access_token in URL parameters")
+            
+            # Strategy 3: Check response headers
+            if not login_token:
+                auth_header = login_response.headers.get('Authorization', '')
+                if auth_header.startswith('Bearer '):
+                    login_token = auth_header[7:]
+                    print(f"Found token in Authorization header")
+                elif 'X-Login-Token' in login_response.headers:
+                    login_token = login_response.headers['X-Login-Token']
+                    print(f"Found token in X-Login-Token header")
+            
+            # Strategy 4: Check response body with multiple patterns
+            if not login_token:
+                patterns = [
+                    r'loginToken["\']?\s*[:=]\s*["\']?([^"\'&\s<>]+)',
+                    r'token["\']?\s*[:=]\s*["\']?([^"\'&\s<>]+)',
+                    r'access_token["\']?\s*[:=]\s*["\']?([^"\'&\s<>]+)',
+                    r'["\']loginToken["\']\s*:\s*["\']([^"\']+)',
+                    r'window\.location\.href\s*=\s*["\'][^"\']*[?&]loginToken=([^"\'&]+)',
+                ]
+                
+                for pattern in patterns:
+                    token_match = re.search(pattern, login_response.text, re.IGNORECASE)
+                    if token_match:
+                        login_token = token_match.group(1)
+                        print(f"Found token in response body using pattern: {pattern[:30]}...")
+                        break
+            
+            # Strategy 5: Look for JavaScript redirects or meta refresh
+            if not login_token:
+                # Check for meta refresh with token
+                meta_match = re.search(r'<meta[^>]+refresh[^>]+url=([^"\'>\s]+)', login_response.text, re.IGNORECASE)
+                if meta_match:
+                    redirect_url = meta_match.group(1)
+                    redirect_params = urllib.parse.parse_qs(urllib.parse.urlparse(redirect_url).query)
+                    if 'loginToken' in redirect_params:
+                        login_token = redirect_params['loginToken'][0]
+                        print(f"Found token in meta refresh redirect")
 
             if login_token:
                 print(f"Successfully obtained login token: {login_token[:20]}...")
@@ -538,7 +652,9 @@ class LocustClient(Client):
             else:
                 print("Could not extract login token from callback")
                 print(f"Final URL: {final_url}")
-                print(f"Response text preview: {login_response.text[:500]}")
+                print(f"URL query params: {query_params}")
+                print(f"Response headers: {dict(login_response.headers)}")
+                print(f"Response text preview: {login_response.text[:1000]}...")
                 return None
 
         except Exception as e:

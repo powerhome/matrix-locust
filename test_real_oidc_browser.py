@@ -98,7 +98,16 @@ class OIDCBrowserAuth:
                     handler_self.wfile.write(b"""
                         <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
                         <h1 style="color: green;">Login Successful!</h1>
-                        <p>You can close this window and return to the terminal.</p>
+                        <p>Window will close automatically in 1 second...</p>
+                        <script>
+                        setTimeout(function() {
+                            window.close();
+                            // Fallback for browsers that don't allow window.close()
+                            if (!window.closed) {
+                                window.location.href = 'about:blank';
+                            }
+                        }, 1000);
+                        </script>
                         </body></html>
                     """)
                 else:
@@ -108,7 +117,16 @@ class OIDCBrowserAuth:
                     handler_self.wfile.write(b"""
                         <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
                         <h1 style="color: red;">Login Failed</h1>
-                        <p>No login token received.</p>
+                        <p>No login token received. Window will close in 1 second...</p>
+                        <script>
+                        setTimeout(function() {
+                            window.close();
+                            // Fallback for browsers that don't allow window.close()
+                            if (!window.closed) {
+                                window.location.href = 'about:blank';
+                            }
+                        }, 1000);
+                        </script>
                         </body></html>
                     """)
         
