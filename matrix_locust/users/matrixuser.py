@@ -219,6 +219,16 @@ class MatrixUser(FastHttpUser):
         # Store OIDC configuration for login
         self.matrix_client.oidc_issuer = oidc_issuer
         self.matrix_client.oidc_client_id = oidc_client_id
+        
+        # Get NitroID credentials from environment variables
+        # This replaces the previous CSV-based password storage for security
+        self.matrix_client.oidc_username = os.getenv('NITROID_USERNAME')
+        self.matrix_client.oidc_password = os.getenv('NITROID_PASSWORD')
+        
+        # Log if credentials are not available
+        if not self.matrix_client.oidc_username or not self.matrix_client.oidc_password:
+            logging.warning(f"NITROID_USERNAME and/or NITROID_PASSWORD environment variables not set for user {self.matrix_client.user}")
+            logging.warning("OIDC login will fail without valid credentials")
 
         if user_dict.get("user_id"):
             self.matrix_client.matrix_domain = user_dict["user_id"].split(":")[-1]

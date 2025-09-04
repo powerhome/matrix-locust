@@ -18,10 +18,11 @@ import cgi
 import json
 import pprint
 import requests
-import jwt
 import base64
 import time
 import urllib.parse
+from bs4 import BeautifulSoup
+import re
 from builtins import str, super
 from collections import deque
 from dataclasses import dataclass, field
@@ -324,45 +325,52 @@ class LocustClient(Client):
         oidc_issuer: str,
         client_id: str = "matrix-locust",
         device_name: Optional[str] = "",
-        redirect_uri: str = "http://localhost:8080/callback"
+        redirect_uri: str = "http://localhost:8080/callback",
+        username: str = None,
+        password: str = None
     ) -> Union[LoginResponse, LoginError]:
-        """Login to the homeserver using OIDC.
+        """Login to the homeserver using real OIDC authentication.
 
-        This method implements the OIDC authentication flow as per Matrix specification.
-        It will simulate the OIDC flow by obtaining an authorization code and exchanging
-        it for an access token.
+        This method implements the actual Matrix SSO/OIDC flow including:
+        1. Initiating SSO redirect with the Matrix homeserver
+        2. Handling NitroID authentication form submission
+        3. Following the callback to get login token
+        4. Using the login token to authenticate with Matrix
 
         Args:
-            oidc_issuer (str): The OIDC issuer URL.
+            oidc_issuer (str): The OIDC issuer URL (e.g., https://id.powerhrg.com).
             client_id (str): The OIDC client ID.
             device_name (str): A display name for the device.
             redirect_uri (str): The redirect URI for OIDC callback.
+            username (str): Username for NitroID login.
+            password (str): Password for NitroID login.
 
         Returns either a `LoginResponse` if the request was successful or
         a `LoginError` if there was an error with the request.
         """
         try:
-            # Step 1: Get OIDC configuration from the issuer
-            well_known_url = f"{oidc_issuer.rstrip('/')}/.well-known/openid_configuration"
-            oidc_config_response = requests.get(well_known_url, timeout=10)
-            oidc_config_response.raise_for_status()
-            oidc_config = oidc_config_response.json()
+            # Get credentials from client attributes if not provided
+            if username is None:
+                username = getattr(self, 'oidc_username', None)
+            if password is None:
+                password = getattr(self, 'oidc_password', None)
 
-            authorization_endpoint = oidc_config["authorization_endpoint"]
-            token_endpoint = oidc_config["token_endpoint"]
+            if not username or not password:
+                return LoginError("OIDC username/password not provided", status_code="M_OIDC_CREDENTIALS_MISSING")
 
-            # Step 2: For load testing, we'll simulate the OIDC flow
-            # In a real scenario, this would involve browser redirects
-            # For testing purposes, we'll create a mock token
-            mock_token = self._create_mock_oidc_token(oidc_issuer, client_id)
+            # Step 1: Get the Matrix SSO login URL
+            login_token = self._perform_real_oidc_flow(username, password, redirect_uri)
 
-            # Step 3: Use the OIDC token to login to Matrix
+            if not login_token:
+                return LoginError("Failed to obtain login token from OIDC flow", status_code="M_OIDC_TOKEN_MISSING")
+
+            # Step 2: Use the login token to authenticate with Matrix
             method, path, data = self._build_request(Api.login(
                 self.user,
                 password=None,
                 device_name=device_name,
                 device_id=self.device_id,
-                token=mock_token,
+                token=login_token,
             ))
 
             response = self._send(LoginResponse, method, path, data)
@@ -373,28 +381,169 @@ class LocustClient(Client):
             return response
 
         except Exception as e:
-            # Return a login error if OIDC flow fails
-            from nio.responses import LoginError
             return LoginError(f"OIDC authentication failed: {str(e)}", status_code="M_OIDC_ERROR")
 
-    def _create_mock_oidc_token(self, issuer: str, client_id: str) -> str:
-        """Create a mock OIDC token for load testing purposes.
+    def _perform_real_oidc_flow(self, username: str, password: str, redirect_uri: str) -> Optional[str]:
+        """Perform the actual OIDC authentication flow with NitroID.
 
-        In a real implementation, this would be obtained from the OIDC provider.
+        This method implements the real Matrix SSO + OIDC flow:
+        1. Start SSO redirect with Matrix homeserver
+        2. Follow redirects to NitroID
+        3. Submit login form to NitroID
+        4. Follow callback redirects to get login token
+
+        Args:
+            username: NitroID username
+            password: NitroID password
+            redirect_uri: Callback URI for OIDC flow
+
+        Returns:
+            Login token from Matrix callback, or None if authentication failed
         """
-        # Create a simple JWT token for testing
-        payload = {
-            "iss": issuer,
-            "aud": client_id,
-            "sub": self.user,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + 3600,  # 1 hour expiration
-            "preferred_username": self.user
-        }
+        session = requests.Session()
+        session.timeout = 30
 
-        # Use a simple secret for testing - in production this would be properly signed
-        token = jwt.encode(payload, "test-secret", algorithm="HS256")
-        return token
+        try:
+            # Step 1: Get the Matrix SSO login URL
+            # Use the Matrix SSO redirect endpoint with NitroID IDP hint
+            matrix_base_url = f"{self.locust_user.host}"
+            sso_redirect_url = f"{matrix_base_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
+
+            # Add the redirect URI as a parameter
+            sso_params = {
+                'redirectUrl': redirect_uri
+            }
+
+            # Step 2: Start the SSO flow - this will redirect to NitroID
+            print(f"Starting SSO flow to {sso_redirect_url}")
+            response = session.get(sso_redirect_url, params=sso_params, allow_redirects=False)
+            
+            # Follow redirects manually with limit to prevent infinite loops
+            redirect_count = 0
+            max_redirects = 10
+            
+            while response.status_code in [301, 302, 303, 307, 308] and redirect_count < max_redirects:
+                redirect_url = response.headers.get('Location')
+                print(f"Redirect {redirect_count + 1}: {response.status_code} -> {redirect_url}")
+                response = session.get(redirect_url, allow_redirects=False)
+                redirect_count += 1
+            
+            if redirect_count >= max_redirects:
+                print(f"Maximum redirects ({max_redirects}) reached. Final URL: {response.url}")
+                return None
+                
+            response.raise_for_status()
+            print(f"Final page reached: {response.url} (status: {response.status_code})")
+
+            # Step 3: We should now be at the NitroID login page
+            # Parse the login form and submit credentials
+            login_token = self._handle_nitroid_login(session, response, username, password, redirect_uri)
+
+            return login_token
+
+        except Exception as e:
+            print(f"OIDC flow failed: {str(e)}")
+            return None
+
+    def _handle_nitroid_login(self, session: requests.Session, response: requests.Response,
+                             username: str, password: str, redirect_uri: str) -> Optional[str]:
+        """Handle the NitroID login form submission.
+
+        Args:
+            session: requests session maintaining cookies
+            response: response from NitroID login page
+            username: NitroID username
+            password: NitroID password
+            redirect_uri: Callback URI
+
+        Returns:
+            Login token from callback, or None if failed
+        """
+        try:
+            print(f"Parsing login page at: {response.url}")
+            print(f"Response content type: {response.headers.get('content-type', 'unknown')}")
+            print(f"Response size: {len(response.text)} characters")
+            
+            # Parse the login form from the NitroID page
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Find the login form
+            login_form = soup.find('form')
+            if not login_form:
+                print("Could not find login form on NitroID page")
+                print(f"Page title: {soup.title.string if soup.title else 'No title'}")
+                print(f"Page preview: {response.text[:500]}...")
+                return None
+            
+            print(f"Found login form with action: {login_form.get('action')}")
+
+            form_action = login_form.get('action')
+            if not form_action.startswith('http'):
+                # Relative URL, make it absolute
+                base_url = f"{response.url.split('?')[0].rsplit('/', 1)[0]}"
+                form_action = f"{base_url}/{form_action.lstrip('/')}"
+
+            # Extract any hidden form fields (CSRF tokens, etc.)
+            form_data = {}
+            for input_field in login_form.find_all('input', {'type': 'hidden'}):
+                name = input_field.get('name')
+                value = input_field.get('value', '')
+                if name:
+                    form_data[name] = value
+
+            # Add username and password fields
+            # Common field names for username/email
+            username_fields = ['email', 'username', 'login', 'user']
+            password_fields = ['password', 'passwd', 'pwd']
+
+            # Find the actual field names from the form
+            for input_field in login_form.find_all('input'):
+                field_type = input_field.get('type', '').lower()
+                field_name = input_field.get('name', '').lower()
+
+                if field_type in ['email', 'text'] or any(uf in field_name for uf in username_fields):
+                    form_data[input_field.get('name')] = username
+                elif field_type == 'password' or any(pf in field_name for pf in password_fields):
+                    form_data[input_field.get('name')] = password
+
+            print(f"Submitting login form to {form_action}")
+            print(f"Form data keys: {list(form_data.keys())}")
+
+            # Submit the login form
+            login_response = session.post(form_action, data=form_data, allow_redirects=True)
+            login_response.raise_for_status()
+
+            # Step 4: Follow redirects to get back to Matrix with login token
+            # The callback should contain a login token in the URL
+            final_url = login_response.url
+            print(f"Final redirect URL: {final_url}")
+
+            # Extract login token from the callback URL
+            # Look for loginToken parameter in URL or in the response
+            parsed_url = urllib.parse.urlparse(final_url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+
+            login_token = None
+            if 'loginToken' in query_params:
+                login_token = query_params['loginToken'][0]
+            else:
+                # Also check the response body for the token
+                token_match = re.search(r'loginToken["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', login_response.text)
+                if token_match:
+                    login_token = token_match.group(1)
+
+            if login_token:
+                print(f"Successfully obtained login token: {login_token[:20]}...")
+                return login_token
+            else:
+                print("Could not extract login token from callback")
+                print(f"Final URL: {final_url}")
+                print(f"Response text preview: {login_response.text[:500]}")
+                return None
+
+        except Exception as e:
+            print(f"Error handling NitroID login: {str(e)}")
+            return None
 
     @logged_in
     def logout(

@@ -15,3 +15,6 @@ locust.csv_failures.csv
 locust.csv_stats.csv
 locust.csv_stats_history.csv
 locust.html
+
+# Environment variables with credentials
+.env
