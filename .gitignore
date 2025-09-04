@@ -3,6 +3,7 @@ __pycache__
 *.swp
 admin.json
 users.csv
+test-user-list.txt
 rooms.json
 tokens.csv
 images

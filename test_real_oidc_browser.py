@@ -13,24 +13,25 @@ Usage:
 from gevent import monkey
 monkey.patch_all()
 
+import csv
 import json
 import logging
 import os
-import threading
 import time
-import urllib.parse
-import webbrowser
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from nio.responses import LoginError, LoginResponse
 
 from matrix_locust.nio.locust_client import LocustClient
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
+
+logging.getLogger("nio.events.misc").setLevel(logging.ERROR)
 
 
 class MockResponse:
@@ -82,123 +83,43 @@ class HostContainer:
             raise
 
 
-class OIDCBrowserAuth:
-    def __init__(self, matrix_url="http://localhost:8008"):
-        self.matrix_url = matrix_url
-        self.login_token = None
-        self.server = None
+def test_oidc_login_for_user(homeserver_url, username, password, oidc_issuer, oidc_client_id):
+    """Test programmatic OIDC login for a specific user."""
 
-    def start_callback_server(self):
-        class CallbackHandler(BaseHTTPRequestHandler):
-            def log_message(self, format, *args):
-                pass
-
-            def do_GET(handler_self):
-                query = urllib.parse.urlparse(handler_self.path).query
-                params = urllib.parse.parse_qs(query)
-
-                if "loginToken" in params:
-                    self.login_token = params["loginToken"][0]
-                    handler_self.send_response(200)
-                    handler_self.send_header("Content-type", "text/html")
-                    handler_self.end_headers()
-                    handler_self.wfile.write(
-                        b"""
-                        <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
-                        <h1 style="color: green;">Login Successful!</h1>
-                        <p>Window will close automatically in 1 second...</p>
-                        <script>
-                        setTimeout(function() {
-                            window.close();
-                            // Fallback for browsers that don't allow window.close()
-                            if (!window.closed) {
-                                window.location.href = 'about:blank';
-                            }
-                        }, 1000);
-                        </script>
-                        </body></html>
-                    """
-                    )
-                else:
-                    handler_self.send_response(400)
-                    handler_self.send_header("Content-type", "text/html")
-                    handler_self.end_headers()
-                    handler_self.wfile.write(
-                        b"""
-                        <html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
-                        <h1 style="color: red;">Login Failed</h1>
-                        <p>No login token received. Window will close in 1 second...</p>
-                        <script>
-                        setTimeout(function() {
-                            window.close();
-                            // Fallback for browsers that don't allow window.close()
-                            if (!window.closed) {
-                                window.location.href = 'about:blank';
-                            }
-                        }, 1000);
-                        </script>
-                        </body></html>
-                    """
-                    )
-
-        self.server = HTTPServer(("localhost", 8080), CallbackHandler)
-        self.server.handle_request()
-
-    def login(self):
-        server_thread = threading.Thread(target=self.start_callback_server)
-        server_thread.daemon = True
-        server_thread.start()
-
-        time.sleep(0.5)
-
-        sso_url = f"{self.matrix_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid?redirectUrl=http://localhost:8080"
-        print(f"Opening browser for NitroID login...")
-        print(f"URL: {sso_url}")
-        webbrowser.open(sso_url)
-
-        print("Please complete login in your browser...")
-        print("Waiting for callback (timeout: 120 seconds)...")
-
-        server_thread.join(timeout=120)
-
-        if self.login_token:
-            print("Login token received successfully")
-        else:
-            print("Timeout - no login token received")
-
-        return self.login_token
-
-
-def test_browser_oidc_login(homeserver_url="http://localhost:8008"):
-    """Test browser-based OIDC login with NitroID."""
-
-    logger.info(f"Testing browser-based OIDC login")
+    logger.info(f"Testing OIDC login for user: {username}")
     logger.info(f"Homeserver: {homeserver_url}")
 
     try:
-        auth = OIDCBrowserAuth(homeserver_url)
-        login_token = auth.login()
-
-        if not login_token:
-            logger.error("Failed to obtain login token from browser")
-            return False
-
-        logger.info("Using login token to authenticate with Matrix...")
-
         host_container = HostContainer(homeserver_url)
+        import uuid
+        device_id = f"LOCUSTTEST_{uuid.uuid4().hex[:8]}"
         client = LocustClient(
             locust_user=host_container,
-            user="test",
-            device_id="LOCUSTTEST123",
+            user=username,
+            device_id=device_id,
         )
 
-        response = client.login(token=login_token)
+        logger.info(f"Performing OIDC login for {username}...")
+        response = client.login_oidc(
+            oidc_issuer=oidc_issuer,
+            client_id=oidc_client_id,
+            username=username,
+            password=password,
+        )
 
         if isinstance(response, LoginResponse):
+            print(f"✅ Matrix Login successful!")
+            print(f"👤 User ID: {response.user_id}")
+            print(f"🔑 Access token received")
+            print(f"📱 Device ID: {response.device_id}")
+
             logger.info("Matrix Login successful!")
             logger.info(f"User ID: {response.user_id}")
             logger.info("Access token received")
             logger.info(f"Device ID: {response.device_id}")
+
+            logger.info(f"Client user_id after login: {client.user_id}")
+            logger.info(f"Client access_token exists: {bool(client.access_token)}")
 
             logger.info("Testing authenticated sync request...")
             sync_response = client.sync(timeout=1000)
@@ -208,25 +129,35 @@ def test_browser_oidc_login(homeserver_url="http://localhost:8008"):
             else:
                 logger.warning("Sync request failed or returned unexpected response")
 
-            logger.info("Creating test room...")
-            import datetime
+            logger.info("Joining test room...")
+            room_id = "!tMcPcABvDSfsxjPtNe:powerapp.cloud"
 
-            timestamp = datetime.datetime.now().strftime("%m-%d %H:%M:%S")
-
-            display_name_response = client.get_displayname(response.user_id)
-            if hasattr(display_name_response, 'displayname') and display_name_response.displayname:
-                display_name = display_name_response.displayname
+            join_response = client.join(room_id)
+            if hasattr(join_response, "room_id"):
+                logger.info(f"Successfully joined room: {join_response.room_id}")
             else:
-                display_name = response.user_id
+                logger.warning("Failed to join room or returned unexpected response")
 
-            room_name = f"Locust: {display_name} {timestamp}"
+            logger.info("Sending message to test room...")
+            message_content = {
+                "msgtype": "m.text",
+                "body": "hello there"
+            }
 
-            room_response = client.room_create(name=room_name)
-            if hasattr(room_response, "room_id"):
-                logger.info(f"Room created successfully: {room_response.room_id}")
-                logger.info(f"Room name: {room_name}")
+            message_response = client.room_send(
+                room_id=room_id,
+                message_type="m.room.message",
+                content=message_content
+            )
+
+            if hasattr(message_response, "event_id"):
+                print(f"📨 Message sent successfully by {response.user_id}: {message_response.event_id}")
+                print(f"💬 Message content: {message_content['body']}")
+                logger.info(f"Message sent successfully: {message_response.event_id}")
+                logger.info(f"Message: {message_content['body']}")
             else:
-                logger.warning("Room creation failed or returned unexpected response")
+                print(f"❌ Message send failed for {response.user_id}")
+                logger.warning("Message send failed or returned unexpected response")
 
             logger.info("Logging out...")
             logout_response = client.logout()
@@ -251,14 +182,65 @@ def test_browser_oidc_login(homeserver_url="http://localhost:8008"):
         return False
 
 
+def test_all_users_from_csv(homeserver_url="http://localhost:8008", csv_file="users.csv"):
+    """Test OIDC login and message sending for all users in CSV file."""
+
+    if not os.path.exists(csv_file):
+        logger.error(f"CSV file {csv_file} not found")
+        return False
+
+    users = []
+    with open(csv_file, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            users.append(row)
+
+    if not users:
+        logger.error(f"No users found in {csv_file}")
+        return False
+
+    logger.info(f"Found {len(users)} users in {csv_file}")
+
+    success_count = 0
+    for i, user in enumerate(users, 1):
+        username = user.get('username', f'user_{i}')
+        password = user.get('password', '')
+        oidc_issuer = user.get('oidc_issuer', '')
+        oidc_client_id = user.get('oidc_client_id', '')
+
+        if not password or not oidc_issuer:
+            logger.error(f"Missing password or OIDC config for user {username}")
+            continue
+
+        logger.info(f"Testing user {i}/{len(users)}: {username}")
+        logger.info("-" * 40)
+
+        success = test_oidc_login_for_user(homeserver_url, username, password, oidc_issuer, oidc_client_id)
+        if success:
+            success_count += 1
+            logger.info(f"User {username} test completed successfully")
+        else:
+            logger.error(f"User {username} test failed")
+
+        logger.info("-" * 40)
+
+        if i < len(users):
+            logger.info("Waiting 2 seconds before next user...")
+            time.sleep(2)
+
+    logger.info("=" * 50)
+    logger.info(f"Overall results: {success_count}/{len(users)} users successful")
+    return success_count == len(users)
+
+
 if __name__ == "__main__":
-    logger.info("Starting Browser-Based OIDC Login Test")
-    logger.info("=" * 50)
+    logger.info("Starting Browser-Based OIDC Login Test for All Users")
+    logger.info("=" * 60)
 
-    success = test_browser_oidc_login("https://pr920.connect-server.beta.px.powerapp.cloud")
+    success = test_all_users_from_csv("https://pr920.connect-server.beta.px.powerapp.cloud")
 
-    logger.info("=" * 50)
+    logger.info("=" * 60)
     if success:
-        logger.info("Test completed successfully!")
+        logger.info("All user tests completed successfully!")
     else:
-        logger.error("Test failed!")
+        logger.error("Some user tests failed!")

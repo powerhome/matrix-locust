@@ -23,8 +23,24 @@ parser.add_argument("--oidc-issuer", type=str, default=None,
                     help="OIDC issuer URL for authentication")
 parser.add_argument("--oidc-client-id", type=str, default="matrix-locust",
                     help="OIDC client ID for authentication")
+parser.add_argument("--from-file", type=str, default=None,
+                    help="Read usernames from file (one per line) instead of generating them")
 
 args = parser.parse_args()
+
+if args.from_file:
+    if not os.path.exists(args.from_file):
+        raise FileNotFoundError(f"Input file {args.from_file} not found")
+    
+    with open(args.from_file, "r", encoding="utf-8") as f:
+        usernames_from_file = [line.strip() for line in f if line.strip()]
+    
+    if not usernames_from_file:
+        raise ValueError(f"No usernames found in file {args.from_file}")
+    
+    print(f"Read {len(usernames_from_file)} usernames from {args.from_file}")
+else:
+    usernames_from_file = None
 
 with open(args.output, "w", encoding="utf-8") as csvfile:
     if args.oidc:
@@ -37,12 +53,18 @@ with open(args.output, "w", encoding="utf-8") as csvfile:
             print("Set them with: export NITROID_USERNAME=your_username NITROID_PASSWORD=your_password")
             print("Users will be generated but OIDC login will fail without credentials.")
         
-        fieldnames = ["username", "oidc_issuer", "oidc_client_id", "user_id"]
+        fieldnames = ["username", "password", "oidc_issuer", "oidc_client_id", "user_id"]
     else:
         fieldnames = ["username", "password"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
-    for i in range(args.num_users):
+    
+    if usernames_from_file:
+        iterations = enumerate(usernames_from_file)
+    else:
+        iterations = enumerate(range(args.num_users))
+    
+    for i, user_data in iterations:
         host = ""
 
         if args.domains is not None:
@@ -52,42 +74,37 @@ with open(args.output, "w", encoding="utf-8") as csvfile:
             if args.oidc_issuer is None:
                 raise ValueError("OIDC issuer URL is required when using --oidc")
             
-            # For OIDC, use the real NitroID username as the base username
-            if nitroid_username:
-                # Use the NitroID username (without @domain if it's an email)
-                base_username = nitroid_username.split('@')[0] if '@' in nitroid_username else nitroid_username
-                if args.num_users == 1:
-                    # Single user - use the exact username
-                    username = base_username
-                else:
-                    # Multiple users - append index to base username
-                    username = f"{base_username}.{i:03d}"
-                user_id = f"@{username}"
+            if usernames_from_file:
+                username = user_data
             else:
-                # Fallback to generated usernames if no NITROID_USERNAME set
-                username = "user.{:06d}".format(i)
-                user_id = "@{}".format(username)
+                if nitroid_username:
+                    base_username = nitroid_username.split('@')[0] if '@' in nitroid_username else nitroid_username
+                    if args.num_users == 1:
+                        username = base_username
+                    else:
+                        username = f"{base_username}.{i:03d}"
+                else:
+                    username = "user.{:06d}".format(i)
             
-            print(f"username = [{username}]\toidc_issuer = [{args.oidc_issuer}]\tuser_id = [{user_id}]")
+            user_id = f"@{username}"
+            
+            password = nitroid_password if nitroid_password else "changeme123"
+            
+            print(f"username = [{username}]\tpassword = [{password}]\toidc_issuer = [{args.oidc_issuer}]\tuser_id = [{user_id}]")
             writer.writerow({
-                "username": username, 
+                "username": username,
+                "password": password,
                 "oidc_issuer": args.oidc_issuer,
                 "oidc_client_id": args.oidc_client_id,
                 "user_id": user_id
             })
         else:
-            # For password-based auth, use generated usernames
-            username = "user.{:06d}".format(i)
+            if usernames_from_file:
+                username = user_data
+            else:
+                username = "user.{:06d}".format(i)
             
-            # WARNING: This is not a safe way to generate real passwords!
-            #          Do not do this in real life!
-            #          Instead, use the Python `secrets` module.
-            #          Here we just want a quick way to generate lots of
-            #          passwords without eating up our system's entropy pool,
-            #          and anyway these are accounts that we are going to
-            #          throw away at the end of the test.
             password = "".join(random.choices("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", k=16))
             print(f"username = [{username}]\tpassword = [{password}]")
 
-            # Access token will be populated when the user is registered
             writer.writerow({"username": username, "password": password})

@@ -396,7 +396,7 @@ class LocustClient(Client):
                 response.raise_for_status()
 
                 print(
-                    f"Final page reached: {response.url} (status: {response.status_code})"
+                    f"Final page reached: (status: {response.status_code})"
                 )
 
                 # Step 3: We should now be at the NitroID login page
@@ -444,11 +444,6 @@ class LocustClient(Client):
             Login token from callback, or None if failed
         """
         try:
-            print(f"Parsing login page at: {response.url}")
-            print(
-                f"Response content type: {response.headers.get('content-type', 'unknown')}"
-            )
-            print(f"Response size: {len(response.text)} characters")
 
             # Parse the login form from the NitroID page
             soup = BeautifulSoup(response.text, "html.parser")
@@ -467,9 +462,6 @@ class LocustClient(Client):
                     for keyword in ["login", "signin", "auth", "credential"]
                 ):
                     login_form = form
-                    print(
-                        f"Found login form by attributes: id='{form.get('id')}', class='{form.get('class')}', action='{form.get('action')}'"
-                    )
                     break
 
             # Strategy 2: Look for forms with password fields
@@ -477,18 +469,11 @@ class LocustClient(Client):
                 for form in soup.find_all("form"):
                     if form.find("input", {"type": "password"}):
                         login_form = form
-                        print(
-                            f"Found login form by password field: action='{form.get('action')}'"
-                        )
                         break
 
             # Strategy 3: Use the first form as fallback
             if not login_form:
                 login_form = soup.find("form")
-                if login_form:
-                    print(
-                        f"Using first form as fallback: action='{login_form.get('action')}'"
-                    )
 
             if not login_form:
                 print("Could not find any login form on NitroID page")
@@ -496,8 +481,6 @@ class LocustClient(Client):
                 print(f"Available forms: {len(soup.find_all('form'))}")
                 print(f"Page preview: {response.text[:500]}...")
                 return None
-
-            print(f"Found login form with action: {login_form.get('action')}")
 
             form_action = login_form.get("action")
             if not form_action.startswith("http"):
@@ -539,9 +522,6 @@ class LocustClient(Client):
                 ):
                     form_data[input_field.get("name")] = username
                     username_field_found = True
-                    print(
-                        f"Found username field: name='{input_field.get('name')}', type='{field_type}', placeholder='{input_field.get('placeholder', '')}'"
-                    )
 
                 # Enhanced password field detection
                 elif (
@@ -552,9 +532,6 @@ class LocustClient(Client):
                 ):
                     form_data[input_field.get("name")] = password
                     password_field_found = True
-                    print(
-                        f"Found password field: name='{input_field.get('name')}', type='{field_type}'"
-                    )
 
             if not username_field_found:
                 print("WARNING: Could not identify username field, trying fallback...")
@@ -565,17 +542,12 @@ class LocustClient(Client):
                         and input_field.get("type", "").lower() != "hidden"
                     ):
                         form_data[input_field.get("name")] = username
-                        print(
-                            f"Using fallback username field: {input_field.get('name')}"
-                        )
                         break
 
             if not password_field_found:
                 print("WARNING: Could not identify password field")
                 # This is more critical - we should see a password field
 
-            print(f"Submitting login form to {form_action}")
-            print(f"Form data keys: {list(form_data.keys())}")
 
             # Submit the login form
             login_response = session.post(
@@ -586,7 +558,6 @@ class LocustClient(Client):
             # Step 4: Follow redirects to get back to Matrix with login token
             # The callback should contain a login token in the URL
             final_url = login_response.url
-            print(f"Final redirect URL: {final_url}")
 
             # Extract login token from the callback URL and response
             parsed_url = urllib.parse.urlparse(final_url)
@@ -597,25 +568,20 @@ class LocustClient(Client):
             # Strategy 1: Check URL parameters
             if "loginToken" in query_params:
                 login_token = query_params["loginToken"][0]
-                print(f"Found login token in URL parameters")
 
             # Strategy 2: Check for common token parameter variations
             elif "token" in query_params:
                 login_token = query_params["token"][0]
-                print(f"Found token in URL parameters")
             elif "access_token" in query_params:
                 login_token = query_params["access_token"][0]
-                print(f"Found access_token in URL parameters")
 
             # Strategy 3: Check response headers
             if not login_token:
                 auth_header = login_response.headers.get("Authorization", "")
                 if auth_header.startswith("Bearer "):
                     login_token = auth_header[7:]
-                    print(f"Found token in Authorization header")
                 elif "X-Login-Token" in login_response.headers:
                     login_token = login_response.headers["X-Login-Token"]
-                    print(f"Found token in X-Login-Token header")
 
             # Strategy 4: Check response body with multiple patterns
             if not login_token:
@@ -631,9 +597,6 @@ class LocustClient(Client):
                     token_match = re.search(pattern, login_response.text, re.IGNORECASE)
                     if token_match:
                         login_token = token_match.group(1)
-                        print(
-                            f"Found token in response body using pattern: {pattern[:30]}..."
-                        )
                         break
 
             # Strategy 5: Look for JavaScript redirects or meta refresh
@@ -651,10 +614,8 @@ class LocustClient(Client):
                     )
                     if "loginToken" in redirect_params:
                         login_token = redirect_params["loginToken"][0]
-                        print(f"Found token in meta refresh redirect")
 
             if login_token:
-                print(f"Successfully obtained login token: {login_token[:20]}...")
                 return login_token
             else:
                 print("Could not extract login token from callback")
