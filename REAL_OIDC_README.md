@@ -55,8 +55,11 @@ poetry install
 export NITROID_USERNAME=your_username
 export NITROID_PASSWORD=your_password
 
-# Run single-user test
+# Option 1: Automated login (no browser interaction)
 python test_real_oidc_login.py
+
+# Option 2: Browser-based login (opens browser, closes automatically)
+python test_real_oidc_browser.py
 
 # Verbose output for debugging
 python test_real_oidc_login.py --verbose
@@ -135,39 +138,68 @@ Ensure your local connect-server has OIDC enabled:
 
 ## Authentication Flow Details
 
-### 1. Matrix SSO Initiation
-- Calls `/_matrix/client/v3/login/sso/redirect/oidc-nitroid`
-- Includes redirect URI for callback handling
+### Option 1: Automated Flow (test_real_oidc_login.py)
+Uses BeautifulSoup to parse and submit forms programmatically:
 
-### 2. NitroID Form Handling
-- Automatically parses NitroID login page HTML
-- Extracts form fields and CSRF tokens
-- Submits credentials programmatically
+1. **Matrix SSO Initiation** - Calls `/_matrix/client/v3/login/sso/redirect/oidc-nitroid`
+2. **Enhanced Redirect Handling** - Automatically follows redirects with proper session management
+3. **Intelligent Form Detection** - Multiple strategies to find login forms:
+   - Forms with login-related attributes (id, class, action)
+   - Forms containing password fields
+   - Fallback to first available form
+4. **Enhanced Field Detection** - Finds username/password fields using:
+   - Field types (email, text, password)
+   - Field names and IDs
+   - Placeholder text analysis
+5. **Robust Token Extraction** - Multiple methods to capture login tokens:
+   - URL query parameters (loginToken, token, access_token)
+   - Response headers (Authorization, X-Login-Token)
+   - Response body regex patterns
+   - JavaScript redirects and meta refresh tags
+6. **Retry Mechanism** - Automatically retries failed attempts with proper session cleanup
 
-### 3. Callback Processing
-- Follows all redirect chains
-- Extracts login token from final callback URL
-- Handles both URL parameters and HTML content
+### Option 2: Browser Flow (test_real_oidc_browser.py)
+Opens a real browser for manual login with automatic cleanup:
 
-### 4. Matrix Authentication
+1. **Callback Server** - Starts local HTTP server on localhost:8080
+2. **Browser Launch** - Opens NitroID login page in default browser
+3. **Manual Login** - User completes login in browser
+4. **Auto-Close** - JavaScript automatically closes browser window after 1 second
+5. **Token Capture** - Extracts login token from callback URL
+6. **Matrix Authentication** - Uses captured token for Matrix login
+
+### Matrix Authentication (Both Options)
 - Uses extracted login token with Matrix login API
 - Establishes authenticated Matrix session
+- Validates with sync request
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"Could not find login form"**
+1. **"Could not find login form"** (Automated Flow)
    - NitroID page structure may have changed
    - Enable verbose logging to inspect HTML content
+   - Try the browser-based flow as an alternative
 
 2. **"Could not extract login token"**
    - Check connect-server OIDC configuration
    - Verify redirect URI handling
+   - Check if callback server is accessible on localhost:8080
 
-3. **Authentication failures**
+3. **"Maximum redirects reached"** (Fixed in latest version)
+   - Previous issue with manual redirect handling
+   - Now uses automatic redirect handling with session persistence
+
+4. **Browser window doesn't close** (Browser Flow)
+   - Some browsers block `window.close()` for security
+   - Window will redirect to blank page as fallback
+   - Script continues running regardless of window state
+
+5. **Authentication failures**
    - Confirm NitroID credentials are valid
    - Check connect-server logs for OIDC errors
+   - Verify environment variables are properly set
 
 ### Debug Mode
 
@@ -207,7 +239,8 @@ Test the flow manually in a browser:
 - `pyproject.toml` - Added beautifulsoup4 dependency
 
 ### New Files
-- `test_real_oidc_login.py` - Single-user testing script
+- `test_real_oidc_login.py` - Automated single-user testing script (no browser)
+- `test_real_oidc_browser.py` - Browser-based testing script (auto-closes after 1 second)
 - `real_oidc_users.csv` - Example credentials file
 - `REAL_OIDC_README.md` - This documentation
 
