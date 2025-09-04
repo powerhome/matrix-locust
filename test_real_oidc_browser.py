@@ -252,7 +252,7 @@ if __name__ == "__main__":
     logger.info("Starting Browser-Based OIDC Login Test")
     logger.info("=" * 50)
 
-    success = test_browser_oidc_login()
+    success = test_browser_oidc_login("https://pr920.connect-server.beta.px.powerapp.cloud")
 
     logger.info("=" * 50)
     if success:
