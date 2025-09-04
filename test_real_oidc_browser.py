@@ -208,8 +208,15 @@ def test_browser_oidc_login(homeserver_url="http://localhost:8008"):
             logger.info("Creating test room...")
             import datetime
 
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            room_name = f"Test room {timestamp}"
+            timestamp = datetime.datetime.now().strftime("%m-%d %H:%M:%S")
+
+            display_name_response = client.get_displayname(response.user_id)
+            if hasattr(display_name_response, 'displayname') and display_name_response.displayname:
+                display_name = display_name_response.displayname
+            else:
+                display_name = response.user_id
+
+            room_name = f"Locust: {display_name} {timestamp}"
 
             room_response = client.room_create(name=room_name)
             if hasattr(room_response, "room_id"):
