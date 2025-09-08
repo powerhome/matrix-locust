@@ -99,7 +99,7 @@ class HostContainer:
 
 
 class TestDataGenerator:
-    def __init__(self, homeserver: str, setup_users: List[Dict[str, str]]):
+    def __init__(self, homeserver: str, setup_users: List[Dict[str, str]], external_users_csv_file: str = "user_external_ids.csv"):
         self.homeserver = homeserver
         self.setup_users = setup_users
         self.clients: Dict[str, LocustClient] = {}
@@ -209,7 +209,7 @@ class TestDataGenerator:
         csv_users = []
         try:
             with open(
-                "/Users/greg/code/connect-v3/matrix-locust/user_external_ids.csv", "r"
+                self.external_users_csv_file, "r"
             ) as f:
                 reader = csv.DictReader(f)
                 for row in reader:
@@ -507,6 +507,7 @@ def main(
     messages_per_room=10,
     room_count=0,
     reactions_per_room=0,
+    external_users_csv_file="user_external_ids.csv",
 ):
     print("\n" + "=" * 70)
     print("MATRIX LOAD TEST - DATA SETUP (OIDC)")
@@ -548,7 +549,7 @@ def main(
     logger.info(f"  Test users: {len(test_users)} (from {test_users_file})")
     logger.info("")
 
-    generator = TestDataGenerator(homeserver, setup_users)
+    generator = TestDataGenerator(homeserver, setup_users, external_users_csv_file)
 
     try:
         logger.info("=" * 50)
@@ -675,6 +676,12 @@ if __name__ == "__main__":
         default=0,
         help="Number of reactions to add per room (default: 0, no reactions)",
     )
+    parser.add_argument(
+        "--external-users-csv",
+        type=str,
+        default="user_external_ids.csv",
+        help="CSV file containing external user IDs to add via Audiences API (default: user_external_ids.csv)",
+    )
 
     args = parser.parse_args()
     main(
@@ -684,4 +691,5 @@ if __name__ == "__main__":
         messages_per_room=args.messages,
         room_count=args.rooms,
         reactions_per_room=args.reactions,
+        external_users_csv_file=args.external_users_csv,
     )
