@@ -94,3 +94,12 @@ Example `setup-users.txt`:
 first.last
 ```
 
+### External User IDs File Format
+
+The `user_external_ids.csv` file contains external user ID mappings for Audiences API integration:
+
+```csv
+auth_provider,external_id,user_id
+oidc-nitroid,123,@u123:example.com
+```
+
