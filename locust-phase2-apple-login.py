@@ -9,6 +9,7 @@ import logging
 import random
 import resource
 import time
+import urllib.parse
 import uuid
 from contextlib import contextmanager
 from typing import Dict, Optional
@@ -31,8 +32,18 @@ logging.getLogger('nio.rooms').setLevel(logging.WARNING)
 logging.getLogger('nio.responses').setLevel(logging.WARNING)
 logging.getLogger('nio.client').setLevel(logging.WARNING)
 
+@events.init_command_line_parser.add_listener
+def _(parser):
+    parser.add_argument(
+        "--sync-type",
+        choices=["standard", "lazy-loading"],
+        default="standard",
+        help="Sync method to use: standard (basic sync) or lazy-loading (filtered sync with lazy_load_members)"
+    )
+
 test_rooms = []
 user_pool = []
+sync_type = "standard"
 
 # Global metrics tracking
 login_metrics = {
@@ -61,7 +72,12 @@ def on_locust_init(environment, **_kwargs):
     except ValueError as e:
         logging.warning(f"Failed to increase the resource limit: {e}")
 
-    global test_rooms
+    global test_rooms, sync_type
+
+    if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'sync_type'):
+        sync_type = environment.parsed_options.sync_type
+        logger.info(f"Using sync type: {sync_type}")
+
     try:
         with open('test_rooms.json', 'r') as f:
             test_rooms = json.load(f)
@@ -346,6 +362,7 @@ class AppleClientUser(HttpUser):
         self.username = None
         self.host_container = None
         self.raw_sync_enabled = True
+        self.sync_type = sync_type
 
     def on_start(self):
         global user_pool
@@ -475,31 +492,27 @@ class AppleClientUser(HttpUser):
                 pass
 
             self.lazy_loading_filter = {
-                "presence": {"limit": 0},
+                "account_data": {
+                    "not_types": [
+                        "m.push_rules"
+                    ]
+                },
                 "room": {
-                    "account_data": {"limit": 0},
-                    "ephemeral": {"limit": 0},
                     "state": {
                         "lazy_load_members": True,
                         "not_types": [
-                            "com.powerhrg.audiences.changed",
                             "com.powerhrg.audience.context.updated",
-                            "com.powerhrg.room.members",
+                            "com.powerhrg.audiences.changed",
                             "com.powerhrg.room.created",
-                            "uk.half-shot.bridge",
-                            "m.bridge"
+                            "com.powerhrg.room.members",
+                            "m.bridge",
+                            "m.room.encryption",
+                            "m.room.guest_access",
+                            "uk.half-shot.bridge"
                         ]
                     },
                     "timeline": {
-                        "limit": 0,
-                        "not_types": [
-                            "com.powerhrg.audiences.changed",
-                            "com.powerhrg.audience.context.updated",
-                            "com.powerhrg.room.members",
-                            "com.powerhrg.room.created",
-                            "uk.half-shot.bridge",
-                            "m.bridge"
-                        ]
+                        "limit": 1
                     }
                 }
             }
@@ -548,7 +561,7 @@ class AppleClientUser(HttpUser):
         if not self.matrix_client:
             return
 
-        logger.info(f"[{self.username}] Starting initial sync with raw HTTP request")
+        logger.info(f"[{self.username}] Starting initial sync ({self.sync_type}) with raw HTTP request")
 
         start_time = time.time()
 
@@ -558,11 +571,18 @@ class AppleClientUser(HttpUser):
                 "Content-Type": "application/json"
             }
 
+            if self.sync_type == "lazy-loading":
+                filter_json = json.dumps(self.lazy_loading_filter)
+                filter_encoded = urllib.parse.quote(filter_json)
+                sync_url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=0"
+            else:
+                sync_url = "/_matrix/client/r0/sync?&set_presence=online&timeout=0"
+
             with self.host_container.rest(
                 "GET",
-                "/_matrix/client/r0/sync?&set_presence=online&timeout=0",
+                sync_url,
                 headers=headers,
-                name="initial_sync"
+                name=f"initial_sync_{self.sync_type}"
             ) as response:
                 sync_duration = time.time() - start_time
 
@@ -579,7 +599,7 @@ class AppleClientUser(HttpUser):
 
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name="initial_sync",
+                        name=f"initial_sync_{self.sync_type}",
                         response_time=sync_duration * 1000,
                         response_length=len(response.text) if hasattr(response, 'text') else 0,
                         exception=Exception(error_msg),
@@ -609,7 +629,7 @@ class AppleClientUser(HttpUser):
 
                 self.environment.events.request.fire(
                     request_type="SYNC",
-                    name="initial_sync",
+                    name=f"initial_sync_{self.sync_type}",
                     response_time=sync_duration * 1000,
                     response_length=response_length,
                     exception=None,
@@ -622,7 +642,7 @@ class AppleClientUser(HttpUser):
 
             self.environment.events.request.fire(
                 request_type="SYNC",
-                name="initial_sync",
+                name=f"initial_sync_{self.sync_type}",
                 response_time=sync_duration * 1000,
                 response_length=0,
                 exception=e,
@@ -634,7 +654,7 @@ class AppleClientUser(HttpUser):
         if not self.matrix_client or not self.sync_token:
             return
 
-        logger.info(f"[{self.username}] Starting background sync loop with raw HTTP requests")
+        logger.info(f"[{self.username}] Starting background sync loop ({self.sync_type}) with raw HTTP requests")
 
         while True:
             try:
@@ -645,13 +665,18 @@ class AppleClientUser(HttpUser):
                     "Content-Type": "application/json"
                 }
 
-                url = f"/_matrix/client/r0/sync?&set_presence=online&timeout=30000&since={self.sync_token}"
+                if self.sync_type == "lazy-loading":
+                    filter_json = json.dumps(self.lazy_loading_filter)
+                    filter_encoded = urllib.parse.quote(filter_json)
+                    url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=30000&since={self.sync_token}"
+                else:
+                    url = f"/_matrix/client/r0/sync?&set_presence=online&timeout=30000&since={self.sync_token}"
 
                 with self.host_container.rest(
                     "GET",
                     url,
                     headers=headers,
-                    name="background_sync"
+                    name=f"background_sync_{self.sync_type}"
                 ) as response:
                     sync_duration = time.time() - start_time
 
@@ -662,6 +687,16 @@ class AppleClientUser(HttpUser):
 
                         track_sync_request(sync_duration * 1000, success=False)
                         logger.error(f"[{self.username}] {error_msg}")
+
+                        self.environment.events.request.fire(
+                            request_type="SYNC",
+                            name=f"background_sync_{self.sync_type}",
+                            response_time=sync_duration * 1000,
+                            response_length=len(response.text) if hasattr(response, 'text') else 0,
+                            exception=Exception(error_msg),
+                            context={}
+                        )
+
                         gevent.sleep(5)
                         continue
 
@@ -676,10 +711,30 @@ class AppleClientUser(HttpUser):
                     response_length = len(response.text) if hasattr(response, 'text') else 0
                     logger.debug(f"[{self.username}] Background sync: {sync_duration:.2f}s, {response_length} bytes")
 
+                    self.environment.events.request.fire(
+                        request_type="SYNC",
+                        name=f"background_sync_{self.sync_type}",
+                        response_time=sync_duration * 1000,
+                        response_length=response_length,
+                        exception=None,
+                        context={"response_size": response_length}
+                    )
+
                 gevent.sleep(random.uniform(0.5, 2.0))
 
             except Exception as e:
+                sync_duration = time.time() - start_time
                 logger.error(f"[{self.username}] Sync loop exception: {str(e)}")
+
+                self.environment.events.request.fire(
+                    request_type="SYNC",
+                    name=f"background_sync_{self.sync_type}",
+                    response_time=sync_duration * 1000,
+                    response_length=0,
+                    exception=e,
+                    context={}
+                )
+
                 gevent.sleep(5)
 
     @task(weight=10)
@@ -687,7 +742,7 @@ class AppleClientUser(HttpUser):
         if not self.initial_sync_complete or not self.matrix_client:
             return
 
-        logger.debug(f"[{self.username}] App foreground - quick sync with raw HTTP")
+        logger.debug(f"[{self.username}] App foreground ({self.sync_type}) - quick sync with raw HTTP")
 
         start_time = time.time()
 
@@ -697,13 +752,18 @@ class AppleClientUser(HttpUser):
                 "Content-Type": "application/json"
             }
 
-            url = f"/_matrix/client/r0/sync?&set_presence=online&timeout=0&since={self.sync_token}"
+            if self.sync_type == "lazy-loading":
+                filter_json = json.dumps(self.lazy_loading_filter)
+                filter_encoded = urllib.parse.quote(filter_json)
+                url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=0&since={self.sync_token}"
+            else:
+                url = f"/_matrix/client/r0/sync?&set_presence=online&timeout=0&since={self.sync_token}"
 
             with self.host_container.rest(
                 "GET",
                 url,
                 headers=headers,
-                name="foreground_sync"
+                name=f"foreground_sync_{self.sync_type}"
             ) as response:
                 sync_time = (time.time() - start_time) * 1000
 
@@ -719,7 +779,7 @@ class AppleClientUser(HttpUser):
                     response_length = len(response.text) if hasattr(response, 'text') else 0
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name="foreground_sync",
+                        name=f"foreground_sync_{self.sync_type}",
                         response_time=sync_time,
                         response_length=response_length,
                         exception=None,
@@ -730,7 +790,7 @@ class AppleClientUser(HttpUser):
                     error_msg = f"Foreground sync failed with status {response.status_code}"
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name="foreground_sync",
+                        name=f"foreground_sync_{self.sync_type}",
                         response_time=sync_time,
                         response_length=len(response.text) if hasattr(response, 'text') else 0,
                         exception=Exception(error_msg),
@@ -742,7 +802,7 @@ class AppleClientUser(HttpUser):
             track_sync_request(sync_time, success=False)
             self.environment.events.request.fire(
                 request_type="SYNC",
-                name="foreground_sync",
+                name=f"foreground_sync_{self.sync_type}",
                 response_time=sync_time,
                 response_length=0,
                 exception=e,
