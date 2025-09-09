@@ -65,16 +65,18 @@ login_metrics = {
     'failed_logins': 0,
     'sync_errors': 0,
     'total_users': 0,
-    'login_times': [],
-    'sync_times': [],
+    'successful_login_times': [],
+    'failed_login_times': [],
     'time_to_interactive': []
 }
 
 # Sync-specific metrics for custom charts
 sync_metrics = {
     'sync_requests_per_second': [],
-    'sync_response_times': [],
-    'sync_request_count': 0,
+    'successful_sync_response_times': [],
+    'failed_sync_response_times': [],
+    'successful_sync_request_count': 0,
+    'failed_sync_request_count': 0,
     'last_sync_timestamp': time.time(),
     'last_report_time': time.time()
 }
@@ -170,8 +172,10 @@ def on_test_stop(environment, **_kwargs):
             "count": len(times_list)
         }
 
-    login_stats = calculate_stats(login_metrics['login_times'])
-    sync_stats = calculate_stats(login_metrics['sync_times'])
+    successful_login_stats = calculate_stats(login_metrics['successful_login_times'])
+    failed_login_stats = calculate_stats(login_metrics['failed_login_times'])
+    successful_sync_stats = calculate_stats(sync_metrics['successful_sync_response_times'])
+    failed_sync_stats = calculate_stats(sync_metrics['failed_sync_response_times'])
     interactive_stats = calculate_stats(login_metrics['time_to_interactive'])
 
     logger.info("\n" + "="*80)
@@ -183,24 +187,38 @@ def on_test_stop(environment, **_kwargs):
     logger.info(f"Sync Errors: {login_metrics['sync_errors']}")
     logger.info(f"Login Success Rate: {(login_metrics['successful_logins'] / max(1, login_metrics['successful_logins'] + login_metrics['failed_logins']) * 100):.1f}%")
     logger.info("-" * 80)
-    logger.info("SYNC PERFORMANCE:")
+    logger.info("SYNC PERFORMANCE (SUCCESSFUL REQUESTS ONLY):")
     current_sync_rps = sync_metrics['sync_requests_per_second'][-1]['rps'] if sync_metrics['sync_requests_per_second'] else 0
-    avg_sync_response_time = sum(sync_metrics['sync_response_times'][-100:]) / len(sync_metrics['sync_response_times'][-100:]) if sync_metrics['sync_response_times'] else 0
-    logger.info(f"  Current Sync RPS: {current_sync_rps:.1f}")
-    logger.info(f"  Avg Sync Response Time: {avg_sync_response_time:.1f}ms")
-    logger.info(f"  Total Sync Requests: {len(sync_metrics['sync_response_times'])}")
+    successful_sync_times = sync_metrics['successful_sync_response_times'][-100:]
+    failed_sync_times = sync_metrics['failed_sync_response_times'][-100:]
+    avg_successful_sync_time = sum(successful_sync_times) / len(successful_sync_times) if successful_sync_times else 0
+    avg_failed_sync_time = sum(failed_sync_times) / len(failed_sync_times) if failed_sync_times else 0
+    total_successful_syncs = len(sync_metrics['successful_sync_response_times'])
+    total_failed_syncs = len(sync_metrics['failed_sync_response_times'])
+    sync_success_rate = (total_successful_syncs / max(1, total_successful_syncs + total_failed_syncs) * 100) if (total_successful_syncs + total_failed_syncs) > 0 else 0
+
+    logger.info(f"  Current Success RPS: {current_sync_rps:.1f}")
+    logger.info(f"  Avg Success Response Time: {avg_successful_sync_time:.1f}ms")
+    logger.info(f"  Avg Failed Response Time: {avg_failed_sync_time:.1f}ms")
+    logger.info(f"  Total Successful Syncs: {total_successful_syncs}")
+    logger.info(f"  Total Failed Syncs: {total_failed_syncs}")
+    logger.info(f"  Sync Success Rate: {sync_success_rate:.1f}%")
     logger.info("-" * 80)
-    logger.info("LOGIN PERFORMANCE:")
-    logger.info(f"  Average: {login_stats['avg']:.1f}ms")
-    logger.info(f"  Min: {login_stats['min']:.1f}ms")
-    logger.info(f"  Max: {login_stats['max']:.1f}ms")
-    logger.info(f"  Count: {login_stats['count']}")
+    logger.info("LOGIN PERFORMANCE (SUCCESSFUL ONLY):")
+    logger.info(f"  Average: {successful_login_stats['avg']:.1f}ms")
+    logger.info(f"  Min: {successful_login_stats['min']:.1f}ms")
+    logger.info(f"  Max: {successful_login_stats['max']:.1f}ms")
+    logger.info(f"  Count: {successful_login_stats['count']}")
+    if failed_login_stats['count'] > 0:
+        logger.info(f"  Failed Login Avg: {failed_login_stats['avg']:.1f}ms ({failed_login_stats['count']} failures)")
     logger.info("-" * 80)
-    logger.info("INITIAL SYNC PERFORMANCE:")
-    logger.info(f"  Average: {sync_stats['avg']:.1f}ms")
-    logger.info(f"  Min: {sync_stats['min']:.1f}ms")
-    logger.info(f"  Max: {sync_stats['max']:.1f}ms")
-    logger.info(f"  Count: {sync_stats['count']}")
+    logger.info("ALL SYNC PERFORMANCE (SUCCESSFUL ONLY):")
+    logger.info(f"  Average: {successful_sync_stats['avg']:.1f}ms")
+    logger.info(f"  Min: {successful_sync_stats['min']:.1f}ms")
+    logger.info(f"  Max: {successful_sync_stats['max']:.1f}ms")
+    logger.info(f"  Count: {successful_sync_stats['count']}")
+    if failed_sync_stats['count'] > 0:
+        logger.info(f"  Failed Sync Avg: {failed_sync_stats['avg']:.1f}ms ({failed_sync_stats['count']} failures)")
     logger.info("-" * 80)
     logger.info("TIME TO INTERACTIVE:")
     logger.info(f"  Average: {interactive_stats['avg']:.1f}ms")
@@ -214,31 +232,46 @@ def track_sync_request(response_time: float, success: bool = True):
     global sync_metrics
 
     current_time = time.time()
-    sync_metrics['sync_request_count'] += 1
-    sync_metrics['sync_response_times'].append(response_time)
 
-    # Calculate requests per second over the last second
+    if success:
+        sync_metrics['successful_sync_request_count'] += 1
+        sync_metrics['successful_sync_response_times'].append(response_time)
+    else:
+        sync_metrics['failed_sync_request_count'] += 1
+        sync_metrics['failed_sync_response_times'].append(response_time)
+
+    # Calculate requests per second over the last second (successful requests only)
     time_diff = current_time - sync_metrics['last_sync_timestamp']
     if time_diff >= 1.0:  # Update RPS every second
-        rps = sync_metrics['sync_request_count'] / time_diff if time_diff > 0 else 0
+        successful_rps = sync_metrics['successful_sync_request_count'] / time_diff if time_diff > 0 else 0
         sync_metrics['sync_requests_per_second'].append({
             'timestamp': current_time,
-            'rps': rps
+            'rps': successful_rps,
+            'successful_count': sync_metrics['successful_sync_request_count'],
+            'failed_count': sync_metrics['failed_sync_request_count']
         })
-        sync_metrics['sync_request_count'] = 0
+        sync_metrics['successful_sync_request_count'] = 0
+        sync_metrics['failed_sync_request_count'] = 0
         sync_metrics['last_sync_timestamp'] = current_time
 
         # Keep only last 300 seconds of data (5 minutes)
         sync_metrics['sync_requests_per_second'] = sync_metrics['sync_requests_per_second'][-300:]
 
     # Keep only last 1000 response times
-    sync_metrics['sync_response_times'] = sync_metrics['sync_response_times'][-1000:]
+    sync_metrics['successful_sync_response_times'] = sync_metrics['successful_sync_response_times'][-1000:]
+    sync_metrics['failed_sync_response_times'] = sync_metrics['failed_sync_response_times'][-1000:]
 
     # Log sync stats every 30 seconds
     if current_time - sync_metrics['last_report_time'] > 30:
         current_rps = sync_metrics['sync_requests_per_second'][-1]['rps'] if sync_metrics['sync_requests_per_second'] else 0
-        avg_response_time = sum(sync_metrics['sync_response_times'][-100:]) / len(sync_metrics['sync_response_times'][-100:]) if sync_metrics['sync_response_times'] else 0
-        logger.info(f"[SYNC STATS] RPS: {current_rps:.1f}, Avg Response: {avg_response_time:.1f}ms, Total: {len(sync_metrics['sync_response_times'])}")
+        successful_times = sync_metrics['successful_sync_response_times'][-100:]
+        failed_times = sync_metrics['failed_sync_response_times'][-100:]
+        avg_successful_response_time = sum(successful_times) / len(successful_times) if successful_times else 0
+        avg_failed_response_time = sum(failed_times) / len(failed_times) if failed_times else 0
+        total_successful = len(sync_metrics['successful_sync_response_times'])
+        total_failed = len(sync_metrics['failed_sync_response_times'])
+
+        logger.info(f"[SYNC STATS] Success RPS: {current_rps:.1f}, Avg Success: {avg_successful_response_time:.1f}ms ({total_successful}), Avg Failed: {avg_failed_response_time:.1f}ms ({total_failed})")
         sync_metrics['last_report_time'] = current_time
 
 @events.init.add_listener
@@ -255,17 +288,17 @@ def on_locust_init_charts(environment, **_kwargs):
             if sync_metrics['sync_requests_per_second']:
                 current_rps = sync_metrics['sync_requests_per_second'][-1]['rps']
 
-            # Calculate average response time over last 100 requests
-            avg_response_time = 0
-            if sync_metrics['sync_response_times']:
-                recent_times = sync_metrics['sync_response_times'][-100:]
-                avg_response_time = sum(recent_times) / len(recent_times)
+            avg_successful_response_time = 0
+            if sync_metrics['successful_sync_response_times']:
+                recent_times = sync_metrics['successful_sync_response_times'][-100:]
+                avg_successful_response_time = sum(recent_times) / len(recent_times)
 
             return {
                 "sync_rps": current_rps,
-                "sync_avg_response_time": avg_response_time,
-                "sync_rps_history": sync_metrics['sync_requests_per_second'][-60:],  # Last minute
-                "sync_response_time_history": sync_metrics['sync_response_times'][-100:]  # Last 100 requests
+                "sync_avg_response_time": avg_successful_response_time,
+                "sync_rps_history": sync_metrics['sync_requests_per_second'][-60:],
+                "sync_response_time_history": sync_metrics['successful_sync_response_times'][-100:],
+                "failed_sync_response_time_history": sync_metrics['failed_sync_response_times'][-100:]
             }
 
         # Add custom stats to Locust's existing charts
@@ -294,7 +327,8 @@ def on_locust_init_charts(environment, **_kwargs):
                 "sync_specific_stats": sync_stats,
                 "custom_sync_metrics": {
                     "current_rps": sync_metrics['sync_requests_per_second'][-1]['rps'] if sync_metrics['sync_requests_per_second'] else 0,
-                    "avg_response_time": sum(sync_metrics['sync_response_times'][-100:]) / len(sync_metrics['sync_response_times'][-100:]) if sync_metrics['sync_response_times'] else 0
+                    "avg_successful_response_time": sum(sync_metrics['successful_sync_response_times'][-100:]) / len(sync_metrics['successful_sync_response_times'][-100:]) if sync_metrics['successful_sync_response_times'] else 0,
+                    "avg_failed_response_time": sum(sync_metrics['failed_sync_response_times'][-100:]) / len(sync_metrics['failed_sync_response_times'][-100:]) if sync_metrics['failed_sync_response_times'] else 0
                 }
             }
 
@@ -485,9 +519,8 @@ class AppleClientUser(HttpUser):
             if isinstance(response, LoginResponse):
                 logger.info(f"[{username}] OIDC login successful in {login_time:.0f}ms")
 
-                # Track metrics
                 login_metrics['successful_logins'] += 1
-                login_metrics['login_times'].append(login_time)
+                login_metrics['successful_login_times'].append(login_time)
 
                 self.environment.events.request.fire(
                     request_type="OIDC",
@@ -501,8 +534,8 @@ class AppleClientUser(HttpUser):
             elif isinstance(response, LoginError):
                 logger.error(f"[{username}] OIDC login failed: {response.message}")
 
-                # Track metrics
                 login_metrics['failed_logins'] += 1
+                login_metrics['failed_login_times'].append(login_time)
 
                 self.environment.events.request.fire(
                     request_type="OIDC",
@@ -520,6 +553,9 @@ class AppleClientUser(HttpUser):
         except Exception as e:
             login_time = (time.time() - start_time) * 1000
             logger.error(f"[{username}] Login exception: {str(e)}")
+
+            login_metrics['failed_logins'] += 1
+            login_metrics['failed_login_times'].append(login_time)
 
             self.environment.events.request.fire(
                 request_type="OIDC",
@@ -642,7 +678,6 @@ class AppleClientUser(HttpUser):
                     if hasattr(response, 'text'):
                         error_msg += f" (response: {response.text[:500]})"
 
-                    # Track sync errors
                     login_metrics['sync_errors'] += 1
                     track_sync_request(sync_duration * 1000, success=False)
 
@@ -674,8 +709,6 @@ class AppleClientUser(HttpUser):
                     self.sync_token = "dummy_token"
                     self.initial_sync_complete = True
 
-                # Track sync metrics
-                login_metrics['sync_times'].append(sync_duration * 1000)
                 track_sync_request(sync_duration * 1000, success=True)
 
                 response_length = len(response.text) if hasattr(response, 'text') else 0
@@ -693,6 +726,9 @@ class AppleClientUser(HttpUser):
         except Exception as e:
             sync_duration = time.time() - start_time
             logger.error(f"[{self.username}] Initial sync exception: {str(e)}")
+
+            login_metrics['sync_errors'] += 1
+            track_sync_request(sync_duration * 1000, success=False)
 
             self.environment.events.request.fire(
                 request_type="SYNC",
