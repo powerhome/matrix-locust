@@ -42,8 +42,8 @@ def _(parser):
     )
     parser.add_argument(
         "--enable-background-sync",
-        action="store_true",
-        default=False,
+        choices=["true", "false"],
+        default="false",
         help="Enable continuous background sync loop (disabled by default for deterministic tests)"
     )
     parser.add_argument(
@@ -95,7 +95,7 @@ def on_locust_init(environment, **_kwargs):
         logger.info(f"Using sync type: {sync_type}")
 
     if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'enable_background_sync'):
-        background_sync_enabled = environment.parsed_options.enable_background_sync
+        background_sync_enabled = environment.parsed_options.enable_background_sync == "true"
         logger.info(f"Background sync enabled: {background_sync_enabled}")
 
     if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'iterations'):
@@ -419,17 +419,18 @@ class AppleClientUser(HttpUser):
         self.username = None
         self.host_container = None
         self.raw_sync_enabled = True
-        self.sync_type = sync_type
+        self.sync_type = self.environment.parsed_options.sync_type if hasattr(self.environment.parsed_options, 'sync_type') else "standard"
 
     def run(self):
         self.on_start()
 
-        for iteration in range(iterations):
-            logger.info(f"[{self.username}] Performing foreground sync {iteration + 1}/{iterations}")
+        current_iterations = self.environment.parsed_options.iterations if hasattr(self.environment.parsed_options, 'iterations') else 1
+        for iteration in range(current_iterations):
+            logger.info(f"[{self.username}] Performing foreground sync {iteration + 1}/{current_iterations}")
             self.simulate_app_foreground()
             gevent.sleep(2)
 
-        logger.info(f"[{self.username}] Completed all {iterations} iterations")
+        logger.info(f"[{self.username}] Completed all {current_iterations} iterations")
         self.on_stop()
 
     def on_start(self):
@@ -488,7 +489,8 @@ class AppleClientUser(HttpUser):
                     context={}
                 )
 
-                if background_sync_enabled:
+                current_background_sync = self.environment.parsed_options.enable_background_sync == "true" if hasattr(self.environment.parsed_options, 'enable_background_sync') else False
+                if current_background_sync:
                     self.sync_task = gevent.spawn(self._sync_loop)
                 else:
                     self.sync_task = None
