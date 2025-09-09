@@ -368,6 +368,7 @@ class HostContainer:
 
 class AppleClientUser(HttpUser):
     wait_time = lambda self: 2
+    _user_counter = 0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -404,7 +405,9 @@ class AppleClientUser(HttpUser):
             logger.error("No users available for testing")
             return
 
-        user_data = user_pool[0] if user_pool else None
+        user_index = AppleClientUser._user_counter % len(user_pool)
+        AppleClientUser._user_counter += 1
+        user_data = user_pool[user_index]
         self.username = user_data.get('username')
         password = user_data.get('password')
         oidc_issuer = user_data.get('oidc_issuer')
@@ -420,7 +423,17 @@ class AppleClientUser(HttpUser):
 
         self.initial_sync_start_time = time.time()
 
-        if self._perform_login(self.username, password, oidc_issuer, oidc_client_id):
+        max_login_attempts = 3
+        login_successful = False
+
+        for attempt in range(max_login_attempts):
+            if self._perform_login(self.username, password, oidc_issuer, oidc_client_id):
+                login_successful = True
+                break
+            logger.warning(f"[{self.username}] Login attempt {attempt+1} failed, retrying...")
+            gevent.sleep(2)
+
+        if login_successful:
             self._perform_post_login_setup()
             self._perform_initial_sync()
 
@@ -445,6 +458,8 @@ class AppleClientUser(HttpUser):
                     self.sync_task = gevent.spawn(self._sync_loop)
                 else:
                     self.sync_task = None
+        else:
+            logger.error(f"[{self.username}] All login attempts failed")
 
     def _perform_login(self, username: str, password: str, oidc_issuer: str, oidc_client_id: str) -> bool:
         global login_metrics
