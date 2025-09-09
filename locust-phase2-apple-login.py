@@ -419,7 +419,6 @@ class AppleClientUser(HttpUser):
         self.username = None
         self.host_container = None
         self.raw_sync_enabled = True
-        self.sync_type = self.environment.parsed_options.sync_type if hasattr(self.environment.parsed_options, 'sync_type') else "standard"
 
     def run(self):
         self.on_start()
@@ -653,7 +652,8 @@ class AppleClientUser(HttpUser):
         if not self.matrix_client:
             return
 
-        logger.info(f"[{self.username}] Starting initial sync ({self.sync_type}) with raw HTTP request")
+        current_sync_type = self.environment.parsed_options.sync_type if hasattr(self.environment.parsed_options, 'sync_type') else "standard"
+        logger.info(f"[{self.username}] Starting initial sync ({current_sync_type}) with raw HTTP request")
 
         start_time = time.time()
 
@@ -663,7 +663,7 @@ class AppleClientUser(HttpUser):
                 "Content-Type": "application/json"
             }
 
-            if self.sync_type == "lazy-loading":
+            if current_sync_type == "lazy-loading":
                 filter_json = json.dumps(self.lazy_loading_filter)
                 filter_encoded = urllib.parse.quote(filter_json)
                 sync_url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=0"
@@ -674,7 +674,7 @@ class AppleClientUser(HttpUser):
                 "GET",
                 sync_url,
                 headers=headers,
-                name=f"initial_sync_{self.sync_type}"
+                name=f"initial_sync_{current_sync_type}"
             ) as response:
                 sync_duration = time.time() - start_time
 
@@ -690,7 +690,7 @@ class AppleClientUser(HttpUser):
 
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name=f"initial_sync_{self.sync_type}",
+                        name=f"initial_sync_{current_sync_type}",
                         response_time=sync_duration * 1000,
                         response_length=len(response.text) if hasattr(response, 'text') else 0,
                         exception=Exception(error_msg),
@@ -721,7 +721,7 @@ class AppleClientUser(HttpUser):
 
                 self.environment.events.request.fire(
                     request_type="SYNC",
-                    name=f"initial_sync_{self.sync_type}",
+                    name=f"initial_sync_{current_sync_type}",
                     response_time=sync_duration * 1000,
                     response_length=response_length,
                     exception=None,
@@ -737,7 +737,7 @@ class AppleClientUser(HttpUser):
 
             self.environment.events.request.fire(
                 request_type="SYNC",
-                name=f"initial_sync_{self.sync_type}",
+                name=f"initial_sync_{current_sync_type}",
                 response_time=sync_duration * 1000,
                 response_length=0,
                 exception=e,
@@ -752,7 +752,8 @@ class AppleClientUser(HttpUser):
         if not self.matrix_client or not self.sync_token:
             return
 
-        logger.info(f"[{self.username}] Starting background sync loop ({self.sync_type}) with raw HTTP requests")
+        current_sync_type = self.environment.parsed_options.sync_type if hasattr(self.environment.parsed_options, 'sync_type') else "standard"
+        logger.info(f"[{self.username}] Starting background sync loop ({current_sync_type}) with raw HTTP requests")
 
         while True:
             try:
@@ -763,7 +764,7 @@ class AppleClientUser(HttpUser):
                     "Content-Type": "application/json"
                 }
 
-                if self.sync_type == "lazy-loading":
+                if current_sync_type == "lazy-loading":
                     filter_json = json.dumps(self.lazy_loading_filter)
                     filter_encoded = urllib.parse.quote(filter_json)
                     url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=30000&since={self.sync_token}"
@@ -774,7 +775,7 @@ class AppleClientUser(HttpUser):
                     "GET",
                     url,
                     headers=headers,
-                    name=f"background_sync_{self.sync_type}"
+                    name=f"background_sync_{current_sync_type}"
                 ) as response:
                     sync_duration = time.time() - start_time
 
@@ -788,7 +789,7 @@ class AppleClientUser(HttpUser):
 
                         self.environment.events.request.fire(
                             request_type="SYNC",
-                            name=f"background_sync_{self.sync_type}",
+                            name=f"background_sync_{current_sync_type}",
                             response_time=sync_duration * 1000,
                             response_length=len(response.text) if hasattr(response, 'text') else 0,
                             exception=Exception(error_msg),
@@ -811,7 +812,7 @@ class AppleClientUser(HttpUser):
 
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name=f"background_sync_{self.sync_type}",
+                        name=f"background_sync_{current_sync_type}",
                         response_time=sync_duration * 1000,
                         response_length=response_length,
                         exception=None,
@@ -826,7 +827,7 @@ class AppleClientUser(HttpUser):
 
                 self.environment.events.request.fire(
                     request_type="SYNC",
-                    name=f"background_sync_{self.sync_type}",
+                    name=f"background_sync_{current_sync_type}",
                     response_time=sync_duration * 1000,
                     response_length=0,
                     exception=e,
@@ -839,7 +840,8 @@ class AppleClientUser(HttpUser):
         if not self.initial_sync_complete or not self.matrix_client:
             return
 
-        logger.debug(f"[{self.username}] App foreground ({self.sync_type}) - quick sync with raw HTTP")
+        current_sync_type = self.environment.parsed_options.sync_type if hasattr(self.environment.parsed_options, 'sync_type') else "standard"
+        logger.debug(f"[{self.username}] App foreground ({current_sync_type}) - quick sync with raw HTTP")
 
         start_time = time.time()
 
@@ -849,7 +851,7 @@ class AppleClientUser(HttpUser):
                 "Content-Type": "application/json"
             }
 
-            if self.sync_type == "lazy-loading":
+            if current_sync_type == "lazy-loading":
                 filter_json = json.dumps(self.lazy_loading_filter)
                 filter_encoded = urllib.parse.quote(filter_json)
                 url = f"/_matrix/client/r0/sync?filter={filter_encoded}&set_presence=online&timeout=0&since={self.sync_token}"
@@ -860,7 +862,7 @@ class AppleClientUser(HttpUser):
                 "GET",
                 url,
                 headers=headers,
-                name=f"foreground_sync_{self.sync_type}"
+                name=f"foreground_sync_{current_sync_type}"
             ) as response:
                 sync_time = (time.time() - start_time) * 1000
 
@@ -876,7 +878,7 @@ class AppleClientUser(HttpUser):
                     response_length = len(response.text) if hasattr(response, 'text') else 0
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name=f"foreground_sync_{self.sync_type}",
+                        name=f"foreground_sync_{current_sync_type}",
                         response_time=sync_time,
                         response_length=response_length,
                         exception=None,
@@ -887,7 +889,7 @@ class AppleClientUser(HttpUser):
                     error_msg = f"Foreground sync failed with status {response.status_code}"
                     self.environment.events.request.fire(
                         request_type="SYNC",
-                        name=f"foreground_sync_{self.sync_type}",
+                        name=f"foreground_sync_{current_sync_type}",
                         response_time=sync_time,
                         response_length=len(response.text) if hasattr(response, 'text') else 0,
                         exception=Exception(error_msg),
@@ -899,7 +901,7 @@ class AppleClientUser(HttpUser):
             track_sync_request(sync_time, success=False)
             self.environment.events.request.fire(
                 request_type="SYNC",
-                name=f"foreground_sync_{self.sync_type}",
+                name=f"foreground_sync_{current_sync_type}",
                 response_time=sync_time,
                 response_length=0,
                 exception=e,
