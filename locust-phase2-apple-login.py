@@ -586,7 +586,9 @@ class AppleClientUser(HttpUser):
                         "m.push_rules"
                     ]
                 },
+                "presence": {"types": []},
                 "room": {
+                    "ephemeral": {"types": []},
                     "state": {
                         "lazy_load_members": True,
                         "not_types": [
