@@ -5,6 +5,7 @@ admin.json
 users.csv
 test-user-list.txt
 rooms.json
+test_rooms.json
 tokens.csv
 images
 venv
