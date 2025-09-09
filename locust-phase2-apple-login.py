@@ -40,10 +40,24 @@ def _(parser):
         default="standard",
         help="Sync method to use: standard (basic sync) or lazy-loading (filtered sync with lazy_load_members)"
     )
+    parser.add_argument(
+        "--enable-background-sync",
+        action="store_true",
+        default=False,
+        help="Enable continuous background sync loop (disabled by default for deterministic tests)"
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="Number of task iterations each user will perform (default: 1)"
+    )
 
 test_rooms = []
 user_pool = []
 sync_type = "standard"
+background_sync_enabled = False
+iterations = 1
 
 # Global metrics tracking
 login_metrics = {
@@ -72,11 +86,19 @@ def on_locust_init(environment, **_kwargs):
     except ValueError as e:
         logging.warning(f"Failed to increase the resource limit: {e}")
 
-    global test_rooms, sync_type
+    global test_rooms, sync_type, background_sync_enabled, iterations
 
     if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'sync_type'):
         sync_type = environment.parsed_options.sync_type
         logger.info(f"Using sync type: {sync_type}")
+
+    if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'enable_background_sync'):
+        background_sync_enabled = environment.parsed_options.enable_background_sync
+        logger.info(f"Background sync enabled: {background_sync_enabled}")
+
+    if hasattr(environment, 'parsed_options') and hasattr(environment.parsed_options, 'iterations'):
+        iterations = environment.parsed_options.iterations
+        logger.info(f"Iterations per user: {iterations}")
 
     try:
         with open('test_rooms.json', 'r') as f:
@@ -345,7 +367,7 @@ class HostContainer:
             self._session.close()
 
 class AppleClientUser(HttpUser):
-    wait_time = between(1, 5)
+    wait_time = lambda self: 2
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -364,6 +386,17 @@ class AppleClientUser(HttpUser):
         self.raw_sync_enabled = True
         self.sync_type = sync_type
 
+    def run(self):
+        self.on_start()
+
+        for iteration in range(iterations):
+            logger.info(f"[{self.username}] Performing foreground sync {iteration + 1}/{iterations}")
+            self.simulate_app_foreground()
+            gevent.sleep(2)
+
+        logger.info(f"[{self.username}] Completed all {iterations} iterations")
+        self.on_stop()
+
     def on_start(self):
         global user_pool
 
@@ -371,7 +404,7 @@ class AppleClientUser(HttpUser):
             logger.error("No users available for testing")
             return
 
-        user_data = random.choice(user_pool)
+        user_data = user_pool[0] if user_pool else None
         self.username = user_data.get('username')
         password = user_data.get('password')
         oidc_issuer = user_data.get('oidc_issuer')
@@ -408,7 +441,10 @@ class AppleClientUser(HttpUser):
                     context={}
                 )
 
-                self.sync_task = gevent.spawn(self._sync_loop)
+                if background_sync_enabled:
+                    self.sync_task = gevent.spawn(self._sync_loop)
+                else:
+                    self.sync_task = None
 
     def _perform_login(self, username: str, password: str, oidc_issuer: str, oidc_client_id: str) -> bool:
         global login_metrics
@@ -605,6 +641,9 @@ class AppleClientUser(HttpUser):
                         exception=Exception(error_msg),
                         context={}
                     )
+
+                    self.sync_token = "dummy_token"
+                    self.initial_sync_complete = True
                     return
 
                 try:
@@ -648,6 +687,9 @@ class AppleClientUser(HttpUser):
                 exception=e,
                 context={}
             )
+
+            self.sync_token = "dummy_token"
+            self.initial_sync_complete = True
 
 
     def _sync_loop(self):
@@ -720,7 +762,7 @@ class AppleClientUser(HttpUser):
                         context={"response_size": response_length}
                     )
 
-                gevent.sleep(random.uniform(0.5, 2.0))
+                gevent.sleep(1.0)
 
             except Exception as e:
                 sync_duration = time.time() - start_time
@@ -737,7 +779,6 @@ class AppleClientUser(HttpUser):
 
                 gevent.sleep(5)
 
-    @task(weight=10)
     def simulate_app_foreground(self):
         if not self.initial_sync_complete or not self.matrix_client:
             return
@@ -809,12 +850,13 @@ class AppleClientUser(HttpUser):
                 context={}
             )
 
-    @task(weight=8)
     def view_room(self):
         if not self.initial_sync_complete or not self.matrix_client or not self.matrix_client.rooms:
             return
 
-        room_id = random.choice(list(self.matrix_client.rooms.keys()))
+        room_id = list(self.matrix_client.rooms.keys())[0] if self.matrix_client.rooms else None
+        if not room_id:
+            return
         logger.debug(f"[{self.username}] Viewing room {room_id}")
 
         start_time = time.time()
@@ -871,12 +913,13 @@ class AppleClientUser(HttpUser):
                 context={"room_id": room_id}
             )
 
-    @task(weight=3)
     def simulate_push_notification_tap(self):
         if not self.initial_sync_complete or not test_rooms:
             return
 
-        room_data = random.choice(test_rooms)
+        room_data = test_rooms[0] if test_rooms else None
+        if not room_data:
+            return
         room_id = room_data['room_id']
 
         logger.debug(f"[{self.username}] Push notification tap - opening room {room_id}")
@@ -925,12 +968,13 @@ class AppleClientUser(HttpUser):
                 context={"room_id": room_id}
             )
 
-    @task(weight=2)
     def scroll_timeline(self):
         if not self.initial_sync_complete or not self.matrix_client or not self.matrix_client.rooms:
             return
 
-        room_id = random.choice(list(self.matrix_client.rooms.keys()))
+        room_id = list(self.matrix_client.rooms.keys())[0] if self.matrix_client.rooms else None
+        if not room_id:
+            return
 
         if room_id not in self.room_states:
             self.view_room()
@@ -980,14 +1024,13 @@ class AppleClientUser(HttpUser):
                 context={"room_id": room_id}
             )
 
-    @task(weight=1)
     def simulate_app_background(self):
         if not self.initial_sync_complete:
             return
 
         logger.debug(f"[{self.username}] App backgrounded - pausing sync")
 
-        gevent.sleep(random.uniform(10, 60))
+        gevent.sleep(30)
 
         logger.debug(f"[{self.username}] App resumed from background")
 
