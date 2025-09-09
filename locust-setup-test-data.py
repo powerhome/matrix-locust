@@ -16,13 +16,19 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
+import gevent
+from gevent import Timeout
+
 from nio.api import RoomVisibility
 from nio.responses import (LoginError, LoginResponse, RoomCreateError, RoomSendError)
 
 from matrix_locust.nio.locust_client import LocustClient
 
+import os
+
+log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper())
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=log_level, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -102,12 +108,104 @@ class TestDataGenerator:
     def __init__(self, homeserver: str, setup_users: List[Dict[str, str]], external_users_csv_file: str = "user_external_ids.csv"):
         self.homeserver = homeserver
         self.setup_users = setup_users
+        self.external_users_csv_file = external_users_csv_file
         self.clients: Dict[str, LocustClient] = {}
         self.created_rooms: List[Tuple[str, str, str]] = []
 
+    @contextmanager
+    def timeout_context(self, seconds: int, error_message: str):
+        timeout = Timeout(seconds, TimeoutError(error_message))
+        timeout.start()
+        try:
+            yield
+        finally:
+            timeout.cancel()
+
+    def check_homeserver_connectivity(self) -> bool:
+        logger.info(f"Checking connectivity to homeserver: {self.homeserver}")
+
+        endpoints_to_check = [
+            ("/_matrix/client/versions", "Matrix versions endpoint"),
+            ("/_matrix/client/v3/login", "Matrix login endpoint"),
+            ("/.well-known/matrix/client", "Matrix well-known endpoint")
+        ]
+
+        for endpoint, description in endpoints_to_check:
+            url = f"{self.homeserver}{endpoint}"
+            try:
+                logger.info(f"Testing {description}: {url}")
+                response = requests.get(url, timeout=15)
+
+                if response.status_code in [200, 404]:  # 404 is acceptable for some endpoints
+                    logger.info(f"✓ {description} responded (HTTP {response.status_code})")
+                elif response.status_code >= 500:
+                    logger.error(f"✗ {description} server error (HTTP {response.status_code})")
+                    return False
+                else:
+                    logger.warning(f"⚠ {description} returned HTTP {response.status_code}")
+
+            except requests.exceptions.Timeout:
+                logger.error(f"✗ Timeout connecting to {description}")
+                return False
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"✗ Connection failed to {description}: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"✗ Error checking {description}: {e}")
+                return False
+
+        return True
+
+    def validate_oidc_endpoints(self, oidc_issuer: str, username: str, idx: int, total_users: int) -> bool:
+        logger.info(f"[{idx+1}/{total_users}] Validating OIDC endpoints for {username}...")
+
+        try:
+            logger.info(f"[{idx+1}/{total_users}] Checking OIDC issuer: {oidc_issuer}")
+
+            well_known_url = f"{oidc_issuer}/.well-known/openid_configuration"
+            response = requests.get(well_known_url, timeout=15)
+
+            if response.status_code == 200:
+                logger.info(f"[{idx+1}/{total_users}] ✓ OIDC configuration available")
+            elif response.status_code >= 500:
+                logger.error(f"[{idx+1}/{total_users}] ✗ OIDC issuer server error (HTTP {response.status_code})")
+                return False
+            else:
+                logger.warning(f"[{idx+1}/{total_users}] ⚠ OIDC configuration returned HTTP {response.status_code}")
+
+            sso_redirect_url = f"{self.homeserver}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
+            logger.info(f"[{idx+1}/{total_users}] Testing SSO redirect endpoint: {sso_redirect_url}")
+
+            response = requests.get(sso_redirect_url, timeout=15, allow_redirects=False)
+
+            if response.status_code in [302, 303, 307, 308]:
+                logger.info(f"[{idx+1}/{total_users}] ✓ SSO redirect endpoint is working (HTTP {response.status_code})")
+                return True
+            elif response.status_code >= 500:
+                logger.error(f"[{idx+1}/{total_users}] ✗ SSO redirect endpoint server error (HTTP {response.status_code})")
+                return False
+            else:
+                logger.warning(f"[{idx+1}/{total_users}] ⚠ SSO redirect returned unexpected HTTP {response.status_code}")
+                return True
+
+        except requests.exceptions.Timeout:
+            logger.error(f"[{idx+1}/{total_users}] ✗ Timeout validating OIDC endpoints")
+            return False
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[{idx+1}/{total_users}] ✗ Connection error validating OIDC: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"[{idx+1}/{total_users}] ✗ Error validating OIDC endpoints: {e}")
+            return False
+
     def login_setup_users(self):
         total_users = len(self.setup_users)
-        logger.info(f"Logging in {total_users} setup users...")
+        logger.info(f"Authenticating {total_users} setup users...")
+
+        # Check homeserver connectivity first
+        if not self.check_homeserver_connectivity():
+            logger.error("Cannot proceed with authentication - homeserver is not reachable")
+            return
 
         for idx, user_data in enumerate(self.setup_users):
             username = user_data["username"]
@@ -115,11 +213,15 @@ class TestDataGenerator:
             oidc_issuer = user_data.get("oidc_issuer")
             oidc_client_id = user_data.get("oidc_client_id", "matrix-locust")
 
-            print(
-                f"🔐 [{idx+1}/{total_users}] Logging in {username}...",
-                end=" ",
-                flush=True,
-            )
+            logger.info(f"[{idx+1}/{total_users}] Starting OIDC authentication for {username}...")
+
+            if not (oidc_issuer and password):
+                logger.error(f"User {username} missing OIDC credentials")
+                continue
+
+            if not self.validate_oidc_endpoints(oidc_issuer, username, idx, total_users):
+                logger.error(f"[{idx+1}/{total_users}] ✗ Skipping {username} due to OIDC validation failure")
+                continue
 
             host_container = HostContainer(self.homeserver)
             device_id = f"SETUP_{uuid.uuid4().hex[:8]}"
@@ -129,77 +231,94 @@ class TestDataGenerator:
                 device_id=device_id,
             )
 
-            if oidc_issuer and password:
-                response = client.login_oidc(
-                    oidc_issuer=oidc_issuer,
-                    client_id=oidc_client_id,
-                    username=username,
-                    password=password,
-                )
+            try:
+                logger.info(f"[{idx+1}/{total_users}] Connecting to OIDC issuer: {oidc_issuer}")
+                logger.info(f"[{idx+1}/{total_users}] Starting SSO flow for {username}...")
+
+                timeout_msg = f"OIDC login for {username} timed out after 120 seconds"
+                with self.timeout_context(120, timeout_msg):
+                    response = client.login_oidc(
+                        oidc_issuer=oidc_issuer,
+                        client_id=oidc_client_id,
+                        username=username,
+                        password=password,
+                    )
 
                 if isinstance(response, LoginResponse):
-                    print("✅")
-                    logger.debug(f"    User ID: {response.user_id}")
-                    logger.debug(f"    Device ID: {response.device_id}")
+                    logger.info(f"[{idx+1}/{total_users}] ✓ {username} authenticated successfully (ID: {response.user_id})")
                     self.clients[username] = client
                 elif isinstance(response, LoginError):
-                    print(f"❌ {response.message}")
-                    continue
+                    logger.error(f"[{idx+1}/{total_users}] ✗ Authentication failed for {username}: {response.message}")
                 else:
-                    print(f"❌ Unexpected response: {type(response)}")
-                    continue
-            else:
-                print("❌ Missing OIDC credentials")
-                continue
+                    logger.error(f"[{idx+1}/{total_users}] ✗ Unexpected response for {username}: {type(response)}")
 
-        logger.info(
-            f"✓ Logged in {len(self.clients)}/{total_users} setup users successfully\n"
-        )
+            except TimeoutError as e:
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.error(f"[{idx+1}/{total_users}] ✗ LOGIN TIMEOUT at {current_time}")
+                logger.error(f"[{idx+1}/{total_users}] ✗ {username} login timed out after 120 seconds")
+                time.sleep(2)
+            except Exception as e:
+                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                if "timeout" in str(e).lower() or "timed out" in str(e).lower():
+                    logger.error(f"[{idx+1}/{total_users}] ✗ {username} connection timed out: {e}")
+                elif "connection" in str(e).lower() or "refused" in str(e).lower():
+                    logger.error(f"[{idx+1}/{total_users}] ✗ {username} connection error: {e}")
+                elif "name or service not known" in str(e).lower() or "nodename" in str(e).lower():
+                    logger.error(f"[{idx+1}/{total_users}] ✗ Cannot resolve hostname: {self.homeserver}")
+                else:
+                    logger.exception(f"[{idx+1}/{total_users}] ✗ {username} login failed: {e}")
+
+                time.sleep(1)
+
+        success_count = len(self.clients)
+        if success_count > 0:
+            logger.info(f"Successfully authenticated {success_count}/{total_users} setup users")
+        else:
+            logger.error("AUTHENTICATION FAILED - NO USERS LOGGED IN")
 
     def create_rooms(self, rooms_per_user: int):
         total_rooms = len(self.clients) * rooms_per_user
-        logger.info(
-            f"Creating {total_rooms} test rooms ({rooms_per_user} per setup user)..."
-        )
+        logger.info(f"Creating {total_rooms} test rooms ({rooms_per_user} per user)")
 
         timestamp = datetime.now().strftime("%m%d_%H%M")
-        room_idx = 0
+        failures = 0
+
         for username, client in self.clients.items():
-            print(
-                f"🏠 {username} creating {rooms_per_user} rooms...", end=" ", flush=True
-            )
+            logger.debug(f"Creating rooms for user {username}")
             created_count = 0
 
             for i in range(rooms_per_user):
-                room_idx += 1
                 room_name = f"{timestamp} #{i + 1}"
 
-                response = client.room_create(
-                    name=room_name, visibility=RoomVisibility.public
-                )
+                try:
+                    response = client.room_create(
+                        name=room_name, visibility=RoomVisibility.public
+                    )
 
-                if isinstance(response, RoomCreateError):
-                    print("❌", end="", flush=True)
-                    logger.debug(f"Failed to create room: {response.message}")
-                elif hasattr(response, "room_id"):
-                    room_id = response.room_id
-                    self.created_rooms.append((room_id, room_name, username))
-                    created_count += 1
-                    if created_count % 10 == 0:
-                        print(f"{created_count}", end=" ", flush=True)
+                    if isinstance(response, RoomCreateError):
+                        logger.debug(f"Room creation failed for {username}: {response.message}")
+                        failures += 1
+                    elif hasattr(response, "room_id"):
+                        room_id = response.room_id
+                        self.created_rooms.append((room_id, room_name, username))
+                        created_count += 1
+                        if created_count % 5 == 0:
+                            logger.debug(f"Created {created_count} rooms for {username}")
                     else:
-                        print("✅", end="", flush=True)
-                else:
-                    print("❌", end="", flush=True)
-                    logger.debug(f"Unexpected response: {response}")
+                        logger.debug(f"Unexpected room creation response for {username}: {type(response)}")
+                        failures += 1
+
+                except Exception as e:
+                    logger.exception(f"Room creation exception for {username}: {e}")
+                    failures += 1
 
                 time.sleep(0.1)
 
-            print(f" ({created_count}/{rooms_per_user})")
+            logger.debug(f"Completed room creation for {username}: {created_count}/{rooms_per_user}")
 
-        logger.info(
-            f"✓ Successfully created {len(self.created_rooms)}/{total_rooms} rooms\n"
-        )
+        success_count = len(self.created_rooms)
+        logger.info(f"Created {success_count}/{total_rooms} rooms successfully" +
+                   (f" ({failures} failures)" if failures > 0 else ""))
 
     def add_users_via_audiences_api(self):
         if not self.created_rooms:
@@ -229,11 +348,7 @@ class TestDataGenerator:
         failed_rooms = 0
 
         for room_idx, (room_id, room_name, owner) in enumerate(self.created_rooms):
-            print(
-                f"👥 [{room_idx+1}/{len(self.created_rooms)}] Adding {len(csv_users)} users to {room_name}...",
-                end=" ",
-                flush=True,
-            )
+            logger.debug(f"[{room_idx+1}/{len(self.created_rooms)}] Adding {len(csv_users)} users to {room_name}")
 
             client = self.clients[owner]
 
@@ -248,12 +363,12 @@ class TestDataGenerator:
                     json=room_context_payload,
                 ) as resp:
                     if resp.status_code != 200:
-                        print(f"❌ Failed to get room context: HTTP {resp.status_code}")
+                        logger.error(f"Failed to get room context for {room_name}: HTTP {resp.status_code}")
                         failed_rooms += 1
                         continue
 
                     if not resp.js or "audiences_key" not in resp.js:
-                        print(f"❌ No audiences key in response")
+                        logger.error(f"No audiences key in response for {room_name}")
                         failed_rooms += 1
                         continue
 
@@ -290,18 +405,18 @@ class TestDataGenerator:
                 ) as resp:
                     if resp.status_code == 200:
                         total_users_now = len(extra_users)
-                        print(
-                            f"✅ Updated extra_users (preserved {len(existing_extra_users)} existing + added {new_users_added} new = {total_users_now} total)"
+                        logger.debug(
+                            f"Updated extra_users for {room_name}: preserved {len(existing_extra_users)} existing + added {new_users_added} new = {total_users_now} total"
                         )
                         successful_rooms += 1
                     else:
-                        print(
-                            f"❌ Failed to update extra_users: HTTP {resp.status_code} - {resp.text}"
+                        logger.error(
+                            f"Failed to update extra_users for {room_name}: HTTP {resp.status_code} - {resp.text}"
                         )
                         failed_rooms += 1
 
             except Exception as e:
-                print(f"❌ Exception: {e}")
+                logger.exception(f"Exception adding users to {room_name}: {e}")
                 failed_rooms += 1
 
             time.sleep(0.1)
@@ -318,22 +433,12 @@ class TestDataGenerator:
         logger.info(
             f"Generating message history: {total_messages} total messages across {total_rooms} rooms"
         )
-        logger.info(
-            f"Each room owner will send {messages_per_room} messages to their rooms"
-        )
-        logger.info("This may take several minutes...\n")
 
         start_time = time.time()
 
         for room_idx, (room_id, room_name, owner) in enumerate(self.created_rooms):
             if room_idx % 10 == 0 or room_idx < 5:
-                print(
-                    f"💬 [{room_idx+1}/{total_rooms}] {owner} messaging in {room_name}...",
-                    end=" ",
-                    flush=True,
-                )
-            elif room_idx % 10 == 0:
-                print(f"💬 [{room_idx+1}/{total_rooms}]...", end=" ", flush=True)
+                logger.debug(f"[{room_idx+1}/{total_rooms}] {owner} messaging in {room_name}")
 
             client = self.clients[owner]
             message_events = []
@@ -360,8 +465,7 @@ class TestDataGenerator:
                 )
 
                 if isinstance(response, RoomSendError):
-                    if room_idx % 10 == 0 or room_idx < 5:
-                        print("❌", end="", flush=True)
+                    logger.debug(f"Message send failed for {owner} in {room_name}: {response.message if hasattr(response, 'message') else 'Unknown error'}")
                 else:
                     message_events.append((response.event_id, client))
                     messages_sent += 1
@@ -373,7 +477,7 @@ class TestDataGenerator:
                 time.sleep(0.02)
 
             if room_idx % 10 == 0 or room_idx < 5:
-                print(f"✅ {messages_sent}/{messages_per_room}")
+                logger.debug(f"Completed messaging for {owner} in {room_name}: {messages_sent}/{messages_per_room}")
 
             if reactions_per_room > 0 and len(message_events) >= reactions_per_room:
                 self._add_reactions(room_id, message_events, owner, reactions_per_room)
@@ -509,9 +613,9 @@ def main(
     reactions_per_room=0,
     external_users_csv_file="user_external_ids.csv",
 ):
-    print("\n" + "=" * 70)
-    print("MATRIX LOAD TEST - DATA SETUP (OIDC)")
-    print("=" * 70 + "\n")
+    logger.info("=" * 70)
+    logger.info("MATRIX LOAD TEST - DATA SETUP (OIDC)")
+    logger.info("=" * 70)
 
     rooms_per_user = 1
     all_users = []
@@ -606,9 +710,9 @@ def main(
                 indent=2,
             )
 
-        print("\n" + "=" * 70)
-        print("✓ TEST DATA SETUP COMPLETE!")
-        print("=" * 70)
+        logger.info("=" * 70)
+        logger.info("✓ TEST DATA SETUP COMPLETE!")
+        logger.info("=" * 70)
         logger.info(f"Summary:")
         logger.info(f"  • Setup users authenticated: {len(generator.clients)}")
         if room_count > 0:
@@ -631,7 +735,7 @@ def main(
             logger.info(f"  • No reactions added (--reactions=0)")
         logger.info(f"  • Added read receipts")
         logger.info(f"  • Saved room list to: test_rooms.json")
-        print("=" * 70 + "\n")
+        logger.info("=" * 70)
 
     finally:
         generator.cleanup()
