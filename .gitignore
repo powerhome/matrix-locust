@@ -6,6 +6,7 @@ users.csv
 *.txt
 *.csv
 rooms.json
+test_rooms.json
 images
 venv
 data
@@ -16,3 +17,4 @@ locust.csv_failures.csv
 locust.csv_stats.csv
 locust.csv_stats_history.csv
 locust.html
+
