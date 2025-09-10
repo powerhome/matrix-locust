@@ -494,7 +494,6 @@ class AppleClientUser(HttpUser):
                             "m.bridge",
                             "m.room.encryption",
                             "m.room.guest_access",
-                            "m.room.member",
                             "uk.half-shot.bridge",
                         ],
                     },
