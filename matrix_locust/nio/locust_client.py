@@ -156,6 +156,37 @@ class LocustClient(Client):
         # Hacky way to allow unpacking a tuple return value
         return (*return_items,)
 
+    def _clean_response_dict(self, data):
+        """Clean response dictionary by replacing None values with empty objects/lists where expected."""
+        if not isinstance(data, dict):
+            return data
+
+        cleaned = {}
+        for key, value in data.items():
+            if value is None:
+                if key in ['rooms', 'account_data', 'presence', 'device_lists']:
+                    cleaned[key] = {}
+                elif key in ['events', 'chunk', 'prev_content', 'state_events']:
+                    cleaned[key] = []
+                else:
+                    cleaned[key] = value
+            elif isinstance(value, dict):
+                cleaned[key] = self._clean_response_dict(value)
+            elif isinstance(value, list):
+                cleaned[key] = [self._clean_response_dict(item) if isinstance(item, dict) else item for item in value]
+            else:
+                cleaned[key] = value
+
+        if 'start' in data and 'chunk' not in cleaned:
+            cleaned['chunk'] = []
+        if 'start' in data and 'end' not in cleaned:
+            cleaned['end'] = cleaned.get('start', '')
+
+        if 'next_batch' in data and 'rooms' not in cleaned:
+            cleaned['rooms'] = {'join': {}, 'invite': {}, 'leave': {}}
+
+        return cleaned
+
     def _send(
         self,
         response: Response,
@@ -170,19 +201,33 @@ class LocustClient(Client):
         if body is not None:
             body = json.loads(body)
 
-        # Strip out url parameters from Locust logs
         if name is None and "?" in url:
             name = url[: url.find("?")]
 
         # Send request and update internal state of the object with the response
         # logging.info("[%s] Making API call to %s" % (self.user, url))
-        with self.locust_user.rest(
-            method, url, headers=headers, json=body, name=name
+        with self.locust_user.client.request(
+            method, url, headers=headers, json=body, name=name, catch_response=True
         ) as resp:
-            matrix_response = response.from_dict(resp.js, *response_data)
-            self.receive_response(matrix_response)
-            self.run_response_callbacks([matrix_response])
-            return matrix_response
+            try:
+                response_json = resp.json() if resp.content else {}
+                if response_json is None:
+                    response_json = {}
+                elif isinstance(response_json, dict):
+                    response_json = self._clean_response_dict(response_json)
+
+                matrix_response = response.from_dict(response_json, *response_data)
+                self.receive_response(matrix_response)
+                self.run_response_callbacks([matrix_response])
+                resp.success()
+                return matrix_response
+            except Exception as e:
+                logging.error(f"Error processing Matrix response for {url}: {e}")
+                logging.error(f"Raw response: {resp.json() if resp.content else 'No content'}")
+                from nio.responses import ErrorResponse
+                error_response = ErrorResponse("Response parsing failed", "M_UNKNOWN", resp.status_code)
+                resp.failure(f"Response parsing failed: {e}")
+                return error_response
 
     def add_response_callback(
         self,
@@ -385,11 +430,9 @@ class LocustClient(Client):
                 matrix_base_url = f"{self.locust_user.host}"
                 sso_redirect_url = f"{matrix_base_url}/_matrix/client/v3/login/sso/redirect/oidc-nitroid"
 
-                # Add the redirect URI as a parameter
-                sso_params = {"redirectUrl": redirect_uri}
-
-                # Step 2: Start the SSO flow - let requests handle redirects automatically
                 print(f"Starting SSO flow to {sso_redirect_url}")
+                print(f"Using callback URL: {redirect_uri}")
+                sso_params = {"redirectUrl": redirect_uri}
                 response = session.get(
                     sso_redirect_url, params=sso_params, allow_redirects=True
                 )
@@ -683,17 +726,17 @@ class LocustClient(Client):
 
         data = json.loads(data)
 
-        with self.locust_user.rest(method, path, json=data) as response1:
+        with self.locust_user.client.request(method, path, json=data, catch_response=True) as response1:
             if response1.status_code == HTTPStatus.OK:  # 200
                 logging.info("User [%s] Success!  Didn't even need UIAA!", self.user)
-                self.user_id = response1.js.get("user_id", None)
-                self.access_token = response1.js.get("access_token", None)
+                self.user_id = response1.json().get("user_id", None)
+                self.access_token = response1.json().get("access_token", None)
                 self.matrix_domain = self.user_id.split(":")[-1]
                 if self.user_id is None or self.access_token is None:
                     logging.error(
                         "User [%s] Failed to parse /register response!\nResponse: %s",
                         self.user,
-                        response1.js,
+                        response1.json(),
                     )
                     return
                 self.locust_user.update_tokens()
@@ -701,17 +744,17 @@ class LocustClient(Client):
                 # Not an error, unauthorized requests are apart of the registration-flow
                 response1.success()
 
-                flows = response1.js.get("flows", None)
+                flows = response1.json().get("flows", None)
                 if flows is None:
                     logging.error(
                         "User [%s] No UIAA flows for /register\nResponse: %s",
                         self.user,
-                        response1.js,
+                        response1.json(),
                     )
                     self.locust_user.environment.runner.quit()
                     return
 
-                session_id = response1.js.get("session", None)
+                session_id = response1.json().get("session", None)
                 if session_id is None:
                     logging.info(
                         "User [%s] No session ID provided by server for /register",
@@ -738,17 +781,17 @@ class LocustClient(Client):
                             elif stage == "m.login.registration_token":
                                 data["auth"]["token"] = token
 
-                            with self.locust_user.rest(
-                                "POST", path, json=data
+                            with self.locust_user.client.request(
+                                "POST", path, json=data, catch_response=True
                             ) as response2:
-                                print(response2.js)
+                                print(response2.json())
                                 if (
                                     response2.status_code == HTTPStatus.OK
                                     or response2.status_code == HTTPStatus.CREATED
                                 ):  # 200 or 201
                                     logging.info("User [%s] Success!", self.user)
-                                    self.user_id = response2.js.get("user_id", None)
-                                    self.access_token = response2.js.get(
+                                    self.user_id = response2.json().get("user_id", None)
+                                    self.access_token = response2.json().get(
                                         "access_token", None
                                     )
                                     self.matrix_domain = self.user_id.split(":")[-1]
@@ -759,7 +802,7 @@ class LocustClient(Client):
                                         logging.error(
                                             "User [%s] Failed to parse /register response!\nResponse: %s",
                                             self.user,
-                                            response2.js,
+                                            response2.json(),
                                         )
                                         return
                                     self.locust_user.update_tokens()
@@ -773,7 +816,7 @@ class LocustClient(Client):
                                         "User[%s] /register failed with status code %d\nResponse: %s",
                                         self.user,
                                         response2.status_code,
-                                        response2.js,
+                                        response2.json(),
                                     )
                                     break
             else:
@@ -781,7 +824,7 @@ class LocustClient(Client):
                     "User[%s] /register failed with status code %d\nResponse: %s",
                     self.user,
                     response1.status_code,
-                    response1.js,
+                    response1.json(),
                 )
 
         # return await self._send(RegisterResponse, method, path, data)
@@ -906,18 +949,18 @@ class LocustClient(Client):
             },
         }
         # with self.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
-        with self.locust_user.rest("POST", url, headers=headers, json=body) as r7:
-            completed = r7.js.get("completed", [])
+        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r7:
+            completed = r7.json().get("completed", [])
             if r7.status_code != 200:
-                error = r7.js.get("error", "???")
-                errcode = r7.js.get("errcode", "???")
+                error = r7.json().get("error", "???")
+                errcode = r7.json().get("errcode", "???")
                 print("Got error response: %s %s" % (errcode, error))
-            print("Register success - Got response: ", json.dumps(r7.js, indent=4))
+            print("Register success - Got response: ", json.dumps(r7.json(), indent=4))
 
-            self.user_id = r7.js.get("user_id", None)
-            self.access_token = r7.js.get("access_token", None)
+            self.user_id = r7.json().get("user_id", None)
+            self.access_token = r7.json().get("access_token", None)
             self.matrix_domain = self.user_id.split(":")[-1]
-            self.device_id = r7.js.get("device_id", None)
+            self.device_id = r7.json().get("device_id", None)
 
     def login_uia(self) -> None:
         """TODO: Update to make this a generic UIA handler that calls callbacks depending on stages
@@ -1007,20 +1050,20 @@ class LocustClient(Client):
                 "session": session_id,
             },
         }
-        with self.locust_user.rest("POST", url, headers=headers, json=body) as r3:
+        with self.locust_user.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
             # with self.client.request("POST", url, headers=headers, json=body, catch_response=True) as r3:
-            completed = r3.js.get("completed", [])
+            completed = r3.json().get("completed", [])
             if r3.status_code != 200:
-                error = r3.js.get("error", "???")
-                errcode = r3.js.get("errcode", "???")
+                error = r3.json().get("error", "???")
+                errcode = r3.json().get("errcode", "???")
                 print(f"Got error response: {errcode} {error}")
                 return
-            print("Login success - Got response: ", json.dumps(r3.js, indent=4))
+            print("Login success - Got response: ", json.dumps(r3.json(), indent=4))
 
-            self.user_id = r3.js.get("user_id", None)
-            self.access_token = r3.js.get("access_token", None)
+            self.user_id = r3.json().get("user_id", None)
+            self.access_token = r3.json().get("access_token", None)
             self.matrix_domain = self.user_id.split(":")[-1]
-            self.device_id = r3.js.get("device_id", None)
+            self.device_id = r3.json().get("device_id", None)
 
     @logged_in
     def room_send(
@@ -1578,6 +1621,7 @@ class LocustClient(Client):
         since: Optional[str] = None,
         full_state: Optional[bool] = None,
         set_presence: Optional[str] = None,
+        name: Optional[str] = None,
     ) -> Union[SyncResponse, SyncError]:
         # tbd update docstr (also decide on _filterT???)
         """Synchronize the client's state with the latest state on the server.
@@ -1636,5 +1680,5 @@ class LocustClient(Client):
         #     # + 15: give server a chance to naturally return before we timeout
         #     timeout=0 if full_state else timeout / 1000 + 15 if timeout else timeout,
         # )
-        label = "/_matrix/client/v3/sync"
+        label = name or "/_matrix/client/v3/sync"
         return self._send(SyncResponse, method, path, name=label)
