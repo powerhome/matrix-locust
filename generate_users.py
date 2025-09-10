@@ -1,44 +1,76 @@
 #!/bin/env python3
 
 import argparse
-import random
 import csv
+import os
 
 parser = argparse.ArgumentParser(
-    description="Generates a list of matrix users to store in a .csv file")
-parser.add_argument("num_users", type=int, default=1000, nargs="?",
-                    help="Number of users to generate")
-parser.add_argument("-o", "--output", type=str, default="users.csv", nargs="?",
-                    help="Output .csv file path")
-parser.add_argument("-d", "--domains", default=None,
-                    type=lambda s: [str(item) for item in s.replace(" ", "").split(',')],
-                    help="Specifies domain(s) for users. Multiple domains must be comma (,) separated.")
-parser.add_argument("-w", "--weights", default=None,
-                    type=lambda s: [float(item) for item in s.split(',')],
-                    help="Comma (,) separated list of weights used for user domain assignment probability")
+    description="Generates a list of matrix users from a file to store in a .csv file"
+)
+parser.add_argument(
+    "-o", "--output", type=str, default="users.csv", help="Output .csv file path"
+)
+parser.add_argument(
+    "--oidc",
+    action="store_true",
+    required=True,
+    help="Generate users for OIDC authentication",
+)
+parser.add_argument(
+    "--oidc-issuer", type=str, default=None, help="OIDC issuer URL for authentication"
+)
+parser.add_argument(
+    "--oidc-client-id",
+    type=str,
+    default="matrix-locust",
+    help="OIDC client ID for authentication",
+)
+parser.add_argument(
+    "--from-file",
+    type=str,
+    required=True,
+    help="Read usernames from file (one per line)",
+)
 
 args = parser.parse_args()
 
+if not os.path.exists(args.from_file):
+    raise FileNotFoundError(f"Input file {args.from_file} not found")
+
+with open(args.from_file, "r", encoding="utf-8") as f:
+    usernames_from_file = [line.strip() for line in f if line.strip()]
+
+if not usernames_from_file:
+    raise ValueError(f"No usernames found in file {args.from_file}")
+
+print(f"Read {len(usernames_from_file)} usernames from {args.from_file}")
+
+nitroid_password = os.getenv("NITROID_PASSWORD")
+
+if not nitroid_password:
+    raise ValueError("NITROID_PASSWORD environment variable is required")
+
+if args.oidc_issuer is None:
+    raise ValueError("OIDC issuer URL is required when using --oidc")
+
 with open(args.output, "w", encoding="utf-8") as csvfile:
-    fieldnames = ["username", "password"]
+    fieldnames = ["username", "password", "oidc_issuer", "oidc_client_id", "user_id"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
-    for i in range(args.num_users):
-        host = ""
 
-        if args.domains is not None:
-             host = random.choices(args.domains, args.weights)[0]
+    for username in usernames_from_file:
+        user_id = f"@{username}"
+        password = nitroid_password
 
-        username = "user.{:06d}:{}".format(i, host)
-        # WARNING: This is not a safe way to generate real passwords!
-        #          Do not do this in real life!
-        #          Instead, use the Python `secrets` module.
-        #          Here we just want a quick way to generate lots of
-        #          passwords without eating up our system's entropy pool,
-        #          and anyway these are accounts that we are going to
-        #          throw away at the end of the test.
-        password = "".join(random.choices("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", k=16))
-        print(f"username = [{username}]\tpassword = [{password}]")
-
-        # Access token will be populated when the user is registered
-        writer.writerow({"username": username, "password": password})
+        print(
+            f"username = [{username}]\tpassword = [{password}]\toidc_issuer = [{args.oidc_issuer}]\tuser_id = [{user_id}]"
+        )
+        writer.writerow(
+            {
+                "username": username,
+                "password": password,
+                "oidc_issuer": args.oidc_issuer,
+                "oidc_client_id": args.oidc_client_id,
+                "user_id": user_id,
+            }
+        )
