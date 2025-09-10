@@ -14,76 +14,128 @@
 # # CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
 # # CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-import base64
-import binascii
 import cgi
 import json
-import logging
-import os
 import pprint
-import re
-import sys
-import time
-import urllib.parse
 from builtins import str, super
-from collections import deque, namedtuple
+from collections import deque
 from dataclasses import dataclass, field
 from functools import wraps
-from http import HTTPStatus
-from typing import (Any, AsyncIterable, BinaryIO, Callable, Coroutine, Dict,
-                    Iterable, List, Optional, Sequence, Set, Tuple, Type,
-                    Union)
+from typing import (
+    Any,
+    AsyncIterable,
+    BinaryIO,
+    Callable,
+    Coroutine,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+)
 from uuid import UUID, uuid4
 
 import nio.api
-import requests
-from bs4 import BeautifulSoup
-from locust import User
-from nio.api import (Api, EventFormat, MessageDirection, PushRuleKind,
-                     ResizingMethod, RoomPreset, RoomVisibility, _FilterT)
-from nio.client import Client, ClientConfig
-from nio.client.base_client import logged_in, store_loaded
+from nio.api import (
+    Api,
+    EventFormat,
+    MessageDirection,
+    PushRuleKind,
+    ResizingMethod,
+    RoomPreset,
+    RoomVisibility,
+    _FilterT,
+)
 from nio.events import MegolmEvent
 # from nio.log import logger_group
-from nio.responses import (DeleteDevicesAuthResponse, DeleteDevicesResponse,
-                           DevicesResponse, DownloadResponse, ErrorResponse,
-                           FileResponse, JoinedMembersResponse, JoinError,
-                           JoinResponse, KeysClaimResponse, KeysQueryResponse,
-                           KeysUploadError, KeysUploadResponse, LoginError,
-                           LoginInfoResponse, LoginResponse, LogoutError,
-                           LogoutResponse, ProfileGetAvatarError,
-                           ProfileGetAvatarResponse,
-                           ProfileGetDisplayNameError,
-                           ProfileGetDisplayNameResponse, ProfileGetResponse,
-                           ProfileSetAvatarError, ProfileSetAvatarResponse,
-                           ProfileSetDisplayNameError,
-                           ProfileSetDisplayNameResponse, Response,
-                           RoomCreateError, RoomCreateResponse,
-                           RoomForgetResponse, RoomGetStateError,
-                           RoomGetStateEventError, RoomGetStateEventResponse,
-                           RoomGetStateResponse, RoomInviteResponse,
-                           RoomKeyRequestResponse, RoomKickResponse,
-                           RoomLeaveResponse, RoomMessagesError,
-                           RoomMessagesResponse, RoomPutStateError,
-                           RoomPutStateResponse, RoomReadMarkersResponse,
-                           RoomRedactResponse, RoomSendResponse,
-                           RoomTypingError, RoomTypingResponse,
-                           ShareGroupSessionResponse, SyncError, SyncResponse,
-                           ThumbnailResponse, ToDeviceResponse,
-                           UpdateDeviceResponse, UpdateReceiptMarkerResponse)
+from nio.responses import (
+    DeleteDevicesAuthResponse,
+    DeleteDevicesResponse,
+    DevicesResponse,
+    DownloadResponse,
+    ErrorResponse,
+    FileResponse,
+    JoinedMembersResponse,
+    JoinError,
+    JoinResponse,
+    KeysClaimResponse,
+    KeysQueryResponse,
+    KeysUploadError,
+    KeysUploadResponse,
+    LoginInfoResponse,
+    LoginError,
+    LoginResponse,
+    LogoutError,
+    LogoutResponse,
+    ProfileGetAvatarError,
+    ProfileGetAvatarResponse,
+    ProfileGetDisplayNameError,
+    ProfileGetDisplayNameResponse,
+    ProfileGetResponse,
+    ProfileSetAvatarError,
+    ProfileSetAvatarResponse,
+    ProfileSetDisplayNameError,
+    ProfileSetDisplayNameResponse,
+    Response,
+    RoomCreateError,
+    RoomCreateResponse,
+    RoomForgetResponse,
+    RoomGetStateEventError,
+    RoomGetStateEventResponse,
+    RoomGetStateError,
+    RoomGetStateResponse,
+    RoomInviteResponse,
+    RoomKeyRequestResponse,
+    RoomKickResponse,
+    RoomLeaveResponse,
+    RoomMessagesError,
+    RoomMessagesResponse,
+    RoomPutStateError,
+    RoomPutStateResponse,
+    RoomReadMarkersResponse,
+    RoomRedactResponse,
+    RoomSendResponse,
+    RoomTypingError,
+    RoomTypingResponse,
+    ShareGroupSessionResponse,
+    SyncError,
+    SyncResponse,
+    ThumbnailResponse,
+    ToDeviceResponse,
+    UpdateDeviceResponse,
+    UpdateReceiptMarkerResponse,
+)
+from nio.client import Client, ClientConfig
+from nio.client.base_client import logged_in, store_loaded
+
+import logging
+from locust import User
+from http import HTTPStatus
+from collections import namedtuple
+
+import binascii
+import base64
+import sys
+import os
 
 # BSSpeke UIA stages are optional
 try:
     sys.path.append(os.path.join(os.path.dirname(__file__), "..", "bsspeke", "python"))
     from ..bsspeke.python import BSSpeke
 except ImportError:
-    logging.warning(
-        "Optional BSSpeke module not found. BSSpeke UIA stages will failif used."
-    )
+    logging.warning("Optional BSSpeke module not found. BSSpeke UIA stages will failif used.")
 
-from matrix_locust.nio.contrib import (ApiExt, RoomGetTagsError,
-                                       RoomGetTagsResponse, RoomSetTagsError,
-                                       RoomSetTagsResponse)
+from matrix_locust.nio.contrib import (
+    ApiExt,
+    RoomGetTagsError,
+    RoomGetTagsResponse,
+    RoomSetTagsError,
+    RoomSetTagsResponse,
+)
 
 
 @dataclass
