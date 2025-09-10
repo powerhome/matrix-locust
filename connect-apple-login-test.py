@@ -617,10 +617,29 @@ class AppleClientUser(HttpUser):
                 self.sync_token = response.next_batch
             else:
                 track_sync_request(sync_time, success=False)
+                if hasattr(response, 'status_code') and response.status_code >= 500:
+                    logger.debug(f"[{self.username}] 5xx error ({response.status_code}), excluding from Locust stats")
+                else:
+                    self.environment.events.request.fire(
+                        request_type="GET",
+                        name=f"foreground_sync_{current_sync_type}",
+                        response_time=sync_time,
+                        response_length=0,
+                        exception=Exception("Sync failed - no next_batch token"),
+                        context={}
+                    )
 
         except Exception as e:
             sync_time = (time.time() - start_time) * 1000
             track_sync_request(sync_time, success=False)
+            self.environment.events.request.fire(
+                request_type="GET",
+                name=f"foreground_sync_{current_sync_type}",
+                response_time=sync_time,
+                response_length=0,
+                exception=e,
+                context={}
+            )
 
     def on_stop(self):
         if self.sync_task:
