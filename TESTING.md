@@ -66,12 +66,10 @@ After running this command:
 The load test supports several command-line options:
 
 - `--sync-type`: Choose between "standard" or "lazy-loading" sync methods
-- `--enable-background-sync`: Enable continuous background sync ("true" or "false")
-- `--iterations`: Number of task iterations per user (default: 1)
 
 Example with options:
 ```bash
-poetry run locust -f connect-apple-login-test.py --sync-type=lazy-loading --iterations=3
+poetry run locust -f connect-apple-login-test.py --sync-type=lazy-loading
 ```
 
 ### User List File Format

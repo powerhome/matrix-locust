@@ -36,25 +36,11 @@ def _(parser):
         default="standard",
         help="Sync method to use: standard (basic sync) or lazy-loading (filtered sync with lazy_load_members)",
     )
-    parser.add_argument(
-        "--enable-background-sync",
-        choices=["true", "false"],
-        default="false",
-        help="Enable continuous background sync loop (disabled by default)",
-    )
-    parser.add_argument(
-        "--iterations",
-        type=int,
-        default=1,
-        help="Number of task iterations each user will perform (default: 1)",
-    )
 
 
 test_rooms = []
 user_pool = []
 sync_type = "standard"
-background_sync_enabled = False
-iterations = 1
 
 tokens_dict = {}
 if os.path.exists("tokens.csv"):
@@ -102,27 +88,13 @@ def on_locust_init(environment, **_kwargs):
     except (ValueError, ImportError) as e:
         logging.warning(f"Failed to increase the resource limit: {e}")
 
-    global test_rooms, sync_type, background_sync_enabled, iterations
+    global test_rooms, sync_type
 
     if hasattr(environment, "parsed_options") and hasattr(
         environment.parsed_options, "sync_type"
     ):
         sync_type = environment.parsed_options.sync_type
         logger.info(f"Using sync type: {sync_type}")
-
-    if hasattr(environment, "parsed_options") and hasattr(
-        environment.parsed_options, "enable_background_sync"
-    ):
-        background_sync_enabled = (
-            environment.parsed_options.enable_background_sync == "true"
-        )
-        logger.info(f"Background sync enabled: {background_sync_enabled}")
-
-    if hasattr(environment, "parsed_options") and hasattr(
-        environment.parsed_options, "iterations"
-    ):
-        iterations = environment.parsed_options.iterations
-        logger.info(f"Iterations per user: {iterations}")
 
     try:
         with open("test_rooms.json", "r") as f:
@@ -410,19 +382,10 @@ class AppleClientUser(HttpUser):
     def run(self):
         self.on_start()
 
-        current_iterations = (
-            self.environment.parsed_options.iterations
-            if hasattr(self.environment.parsed_options, "iterations")
-            else 1
-        )
-        for iteration in range(current_iterations):
-            logger.info(
-                f"[{self.username}] Performing foreground sync {iteration + 1}/{current_iterations}"
-            )
-            self.simulate_app_foreground()
-            gevent.sleep(2)
+        logger.info(f"[{self.username}] Performing foreground sync")
+        self.simulate_app_foreground()
 
-        logger.info(f"[{self.username}] Completed all {current_iterations} iterations")
+        logger.info(f"[{self.username}] Completed foreground sync")
         self.on_stop()
 
     def on_start(self):
@@ -505,26 +468,6 @@ class AppleClientUser(HttpUser):
                         context={},
                     )
 
-                    current_background_sync = (
-                        self.environment.parsed_options.enable_background_sync == "true"
-                        if hasattr(
-                            self.environment.parsed_options, "enable_background_sync"
-                        )
-                        else False
-                    )
-                    if current_background_sync:
-                        current_sync_type = (
-                            self.environment.parsed_options.sync_type
-                            if hasattr(self.environment.parsed_options, "sync_type")
-                            else "standard"
-                        )
-                        sync_filter = None
-                        if current_sync_type == "lazy-loading" and self.lazy_loading_filter:
-                            sync_filter = self.lazy_loading_filter
-
-                        self.matrix_sync_task = gevent.spawn(
-                            self.sync_forever, client_sleep=None, timeout=30_000, sync_filter=sync_filter
-                        )
             else:
                 logger.error(f"[{self.username}] All login attempts failed")
 
