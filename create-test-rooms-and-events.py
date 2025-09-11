@@ -477,7 +477,7 @@ def main(
         return
 
     logger.info("=" * 70)
-    logger.info("MATRIX LOAD TEST DATA SETUP (Connect v3)")
+    logger.info("MATRIX LOAD TEST DATA SETUP")
     logger.info("=" * 70)
     logger.info(f"Homeserver: {host}")
     logger.info(f"Setup users file: {setup_users_file}")
@@ -584,7 +584,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Setup test data for Matrix load testing (Connect v3)"
+        description="Setup test data for Matrix load testing"
     )
     parser.add_argument(
         "--host",

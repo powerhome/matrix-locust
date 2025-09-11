@@ -187,7 +187,7 @@ def on_test_stop(environment, **_kwargs):
     interactive_stats = calculate_stats(login_metrics["time_to_interactive"])
 
     logger.info("\n" + "=" * 80)
-    logger.info("CONNECT APPLE LOGIN TEST SUMMARY REPORT")
+    logger.info("OIDC LOGIN TEST SUMMARY REPORT")
     logger.info("=" * 80)
     logger.info(f"Total Users: {len(user_pool)}")
     logger.info(f"Successful Logins: {login_metrics['successful_logins']}")
@@ -403,7 +403,7 @@ class AppleClientUser(HttpUser):
         user_data = user_pool[user_index]
         self.username = user_data.get("username")
 
-        logger.info(f"[{self.username}] Starting Connect Apple client simulation")
+        logger.info(f"[{self.username}] Starting OIDC client simulation")
         self.initial_sync_start_time = time.time()
 
         self.login_from_csv_real_oidc(user_data)
@@ -475,7 +475,6 @@ class AppleClientUser(HttpUser):
                 logger.error(f"[{self.username}] All login attempts failed")
 
     def _perform_post_login_setup(self):
-        """Perform the API calls that Connect Apple makes after successful login."""
         if not self.matrix_client:
             return
 
