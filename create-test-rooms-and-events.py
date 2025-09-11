@@ -9,13 +9,13 @@ import csv
 import json
 import logging
 import os
-import requests
 import time
 import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Tuple
 
 import gevent
+import requests
 from nio.api import RoomVisibility
 from nio.responses import (LoginError, LoginResponse, RoomCreateError,
                            RoomSendError)
@@ -87,14 +87,26 @@ class TestDataGenerator:
                     self.session = requests.Session()
                     self.base_url = base_url
 
-                def request(self, method, url, headers=None, json=None, name=None, catch_response=False):
-                    if not url.startswith('http'):
+                def request(
+                    self,
+                    method,
+                    url,
+                    headers=None,
+                    json=None,
+                    name=None,
+                    catch_response=False,
+                ):
+                    if not url.startswith("http"):
                         url = self.base_url + url
-                    response = self.session.request(method, url, headers=headers, json=json)
+                    response = self.session.request(
+                        method, url, headers=headers, json=json
+                    )
                     return MockResponse(response)
 
             class MockRestContext:
-                def __init__(self, client, method, url, headers=None, json=None, name=None):
+                def __init__(
+                    self, client, method, url, headers=None, json=None, name=None
+                ):
                     self.client = client
                     self.method = method
                     self.url = url
@@ -108,7 +120,7 @@ class TestDataGenerator:
 
                 def __enter__(self):
                     url = self.url
-                    if not url.startswith('http'):
+                    if not url.startswith("http"):
                         url = self.client.base_url + url
 
                     self.response = self.client.session.request(
@@ -131,7 +143,9 @@ class TestDataGenerator:
                     self.client = MockLocustClient(host)
 
                 def rest(self, method, url, headers=None, json=None, name=None):
-                    return MockRestContext(self.client, method, url, headers, json, name)
+                    return MockRestContext(
+                        self.client, method, url, headers, json, name
+                    )
 
             host_container = SimpleHost(self.homeserver)
             import uuid
@@ -624,4 +638,3 @@ if __name__ == "__main__":
         reactions_per_room=args.reactions,
         external_users_csv_file=args.external_users_csv,
     )
-

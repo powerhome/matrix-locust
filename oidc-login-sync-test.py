@@ -50,7 +50,7 @@ if os.path.exists("tokens.csv"):
             row["username"]: {
                 "user_id": row["user_id"],
                 "access_token": row["access_token"],
-                "next_batch": row["next_batch"]
+                "next_batch": row["next_batch"],
             }
             for row in csv.DictReader(csvfile, fieldnames=csv_header)
         }
@@ -155,6 +155,7 @@ def load_users_handler(environment, msg, **_kwargs):
     global user_pool
     user_pool = msg.data
     logger.info(f"Worker received {len(msg.data)} users")
+
 
 def load_rooms_handler(environment, msg, **_kwargs):
     global test_rooms
@@ -344,8 +345,10 @@ class AppleClientUser(HttpUser):
                 "next_batch"
             )
         if (
-            self.matrix_client.user_id and len(self.matrix_client.user_id) < 1
-            or self.matrix_client.access_token and len(self.matrix_client.access_token) < 1
+            self.matrix_client.user_id
+            and len(self.matrix_client.user_id) < 1
+            or self.matrix_client.access_token
+            and len(self.matrix_client.access_token) < 1
         ):
             self.matrix_client.user_id = None
             self.matrix_client.access_token = None
@@ -551,8 +554,10 @@ class AppleClientUser(HttpUser):
                 sync_filter = self.lazy_loading_filter
 
             response = self.matrix_client.sync(
-                timeout=0, sync_filter=sync_filter, set_presence="online",
-                name=f"initial_sync_{current_sync_type}"
+                timeout=0,
+                sync_filter=sync_filter,
+                set_presence="online",
+                name=f"initial_sync_{current_sync_type}",
             )
 
             sync_duration = time.time() - start_time
@@ -607,7 +612,7 @@ class AppleClientUser(HttpUser):
                 sync_filter=sync_filter,
                 since=self.sync_token,
                 set_presence="online",
-                name=f"foreground_sync_{current_sync_type}"
+                name=f"foreground_sync_{current_sync_type}",
             )
 
             sync_time = (time.time() - start_time) * 1000
@@ -617,8 +622,10 @@ class AppleClientUser(HttpUser):
                 self.sync_token = response.next_batch
             else:
                 track_sync_request(sync_time, success=False)
-                if hasattr(response, 'status_code') and response.status_code >= 500:
-                    logger.debug(f"[{self.username}] 5xx error ({response.status_code}), excluding from Locust stats")
+                if hasattr(response, "status_code") and response.status_code >= 500:
+                    logger.debug(
+                        f"[{self.username}] 5xx error ({response.status_code}), excluding from Locust stats"
+                    )
                 else:
                     self.environment.events.request.fire(
                         request_type="GET",
@@ -626,7 +633,7 @@ class AppleClientUser(HttpUser):
                         response_time=sync_time,
                         response_length=0,
                         exception=Exception("Sync failed - no next_batch token"),
-                        context={}
+                        context={},
                     )
 
         except Exception as e:
@@ -638,7 +645,7 @@ class AppleClientUser(HttpUser):
                 response_time=sync_time,
                 response_length=0,
                 exception=e,
-                context={}
+                context={},
             )
 
     def on_stop(self):
@@ -646,4 +653,3 @@ class AppleClientUser(HttpUser):
             gevent.kill(self.sync_task)
         super().on_stop()
         logger.info(f"[{self.username}] Client stopped")
-

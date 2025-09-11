@@ -143,9 +143,7 @@ class LocustOIDCClient(LocustClient):
                 )
                 response.raise_for_status()
 
-                print(
-                    f"Final page reached: (status: {response.status_code})"
-                )
+                print(f"Final page reached: (status: {response.status_code})")
 
                 # Step 3: We should now be at the OIDC provider login page
                 # Parse the login form and submit credentials
@@ -295,7 +293,6 @@ class LocustOIDCClient(LocustClient):
             if not password_field_found:
                 print("WARNING: Could not identify password field")
                 # This is more critical - we should see a password field
-
 
             # Submit the login form
             login_response = session.post(
