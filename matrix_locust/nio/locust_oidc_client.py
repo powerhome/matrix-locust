@@ -23,7 +23,7 @@ class LocustOIDCClient(LocustClient):
         oidc_issuer: str,
         client_id: str = "matrix-locust",
         device_name: Optional[str] = "",
-        redirect_uri: str = "http://localhost:8080/callback",
+        redirect_uri: str = None,
         username: str = None,
         password: str = None,
     ) -> Union[LoginResponse, LoginError]:
@@ -39,7 +39,8 @@ class LocustOIDCClient(LocustClient):
             oidc_issuer (str): The OIDC issuer URL (e.g., https://id.powerhrg.com).
             client_id (str): The OIDC client ID.
             device_name (str): A display name for the device.
-            redirect_uri (str): The redirect URI for OIDC callback.
+            redirect_uri (str, optional): The redirect URI for OIDC callback. 
+                If not provided, defaults to the Matrix homeserver's OIDC callback endpoint.
             username (str): Username for OIDC provider login.
             password (str): Password for OIDC provider login.
 
@@ -52,6 +53,11 @@ class LocustOIDCClient(LocustClient):
                 username = getattr(self, "oidc_username", None)
             if password is None:
                 password = getattr(self, "oidc_password", None)
+
+            # Construct default redirect_uri from Matrix homeserver URL if not provided
+            if redirect_uri is None:
+                matrix_base_url = f"{self.locust_user.host}"
+                redirect_uri = f"{matrix_base_url}/_synapse/client/oidc/callback"
 
             if not username or not password:
                 return LoginError(
