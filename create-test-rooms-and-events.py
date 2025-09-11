@@ -20,7 +20,7 @@ from nio.api import RoomVisibility
 from nio.responses import (LoginError, LoginResponse, RoomCreateError,
                            RoomSendError)
 
-from matrix_locust.nio.locust_client import LocustClient
+from matrix_locust.nio.locust_oidc_client import LocustOIDCClient
 
 log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper())
 logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -37,7 +37,7 @@ class TestDataGenerator:
         self.homeserver = homeserver
         self.setup_users = setup_users
         self.external_users_csv_file = external_users_csv_file
-        self.clients: Dict[str, LocustClient] = {}
+        self.clients: Dict[str, LocustOIDCClient] = {}
         self.created_rooms: List[Tuple[str, str, str]] = []
 
     def login_setup_users(self):
@@ -94,12 +94,13 @@ class TestDataGenerator:
                     return MockResponse(response)
 
             class MockRestContext:
-                def __init__(self, client, method, url, headers=None, json=None):
+                def __init__(self, client, method, url, headers=None, json=None, name=None):
                     self.client = client
                     self.method = method
                     self.url = url
                     self.headers = headers
                     self.json_data = json
+                    self.name = name
                     self.response = None
                     self.status_code = None
                     self.js = None
@@ -129,15 +130,15 @@ class TestDataGenerator:
                     self.host = host
                     self.client = MockLocustClient(host)
 
-                def rest(self, method, url, headers=None, json=None):
-                    return MockRestContext(self.client, method, url, headers, json)
+                def rest(self, method, url, headers=None, json=None, name=None):
+                    return MockRestContext(self.client, method, url, headers, json, name)
 
             host_container = SimpleHost(self.homeserver)
             import uuid
 
             device_id = f"SETUP_{uuid.uuid4().hex[:8]}"
 
-            client = LocustClient(
+            client = LocustOIDCClient(
                 locust_user=host_container,
                 user=username,
                 device_id=device_id,

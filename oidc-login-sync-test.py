@@ -15,7 +15,7 @@ from locust import HttpUser, events
 from locust.runners import MasterRunner, WorkerRunner
 from nio.responses import LoginError, LoginResponse, SyncError
 
-from matrix_locust.nio.locust_client import LocustClient
+from matrix_locust.nio.locust_oidc_client import LocustOIDCClient
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -300,7 +300,7 @@ class AppleClientUser(HttpUser):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.matrix_client = LocustClient(locust_user=self)
+        self.matrix_client = LocustOIDCClient(locust_user=self)
         self.sync_token = None
         self.initial_sync_complete = False
         self.initial_sync_start_time = None
