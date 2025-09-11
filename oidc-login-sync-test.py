@@ -22,7 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reduce nio's logging verbosity to avoid noise
 logging.getLogger("nio.rooms").setLevel(logging.WARNING)
 logging.getLogger("nio.responses").setLevel(logging.WARNING)
 logging.getLogger("nio.client").setLevel(logging.WARNING)
@@ -57,7 +56,6 @@ if os.path.exists("tokens.csv"):
         if "username" in tokens_dict:
             tokens_dict.pop("username")
 
-# Global metrics tracking
 login_metrics = {
     "successful_logins": 0,
     "failed_logins": 0,
@@ -67,7 +65,6 @@ login_metrics = {
     "time_to_interactive": [],
 }
 
-# Sync-specific metrics for custom charts
 sync_metrics = {
     "sync_requests_per_second": [],
     "successful_sync_response_times": [],
@@ -165,64 +162,13 @@ def load_rooms_handler(environment, msg, **_kwargs):
 
 @events.test_stop.add_listener
 def on_test_stop(environment, **_kwargs):
-    """Print a summary report when the test stops."""
+    """Print a brief summary when the test stops."""
     global login_metrics
 
-    def calculate_stats(times_list):
-        if not times_list:
-            return {"avg": 0, "min": 0, "max": 0, "count": 0}
-        return {
-            "avg": sum(times_list) / len(times_list),
-            "min": min(times_list),
-            "max": max(times_list),
-            "count": len(times_list),
-        }
+    total_logins = login_metrics['successful_logins'] + login_metrics['failed_logins']
+    success_rate = (login_metrics['successful_logins'] / max(1, total_logins) * 100)
 
-    successful_login_stats = calculate_stats(login_metrics["successful_login_times"])
-    failed_login_stats = calculate_stats(login_metrics["failed_login_times"])
-    successful_sync_stats = calculate_stats(
-        sync_metrics["successful_sync_response_times"]
-    )
-    failed_sync_stats = calculate_stats(sync_metrics["failed_sync_response_times"])
-    interactive_stats = calculate_stats(login_metrics["time_to_interactive"])
-
-    logger.info("\n" + "=" * 80)
-    logger.info("OIDC LOGIN TEST SUMMARY REPORT")
-    logger.info("=" * 80)
-    logger.info(f"Total Users: {len(user_pool)}")
-    logger.info(f"Successful Logins: {login_metrics['successful_logins']}")
-    logger.info(f"Failed Logins: {login_metrics['failed_logins']}")
-    logger.info(f"Sync Errors: {login_metrics['sync_errors']}")
-    logger.info(
-        f"Login Success Rate: {(login_metrics['successful_logins'] / max(1, login_metrics['successful_logins'] + login_metrics['failed_logins']) * 100):.1f}%"
-    )
-    logger.info("-" * 80)
-    logger.info("LOGIN PERFORMANCE (SUCCESSFUL ONLY):")
-    logger.info(f"  Average: {successful_login_stats['avg']:.1f}ms")
-    logger.info(f"  Min: {successful_login_stats['min']:.1f}ms")
-    logger.info(f"  Max: {successful_login_stats['max']:.1f}ms")
-    logger.info(f"  Count: {successful_login_stats['count']}")
-    if failed_login_stats["count"] > 0:
-        logger.info(
-            f"  Failed Login Avg: {failed_login_stats['avg']:.1f}ms ({failed_login_stats['count']} failures)"
-        )
-    logger.info("-" * 80)
-    logger.info("SYNC PERFORMANCE (SUCCESSFUL ONLY):")
-    logger.info(f"  Average: {successful_sync_stats['avg']:.1f}ms")
-    logger.info(f"  Min: {successful_sync_stats['min']:.1f}ms")
-    logger.info(f"  Max: {successful_sync_stats['max']:.1f}ms")
-    logger.info(f"  Count: {successful_sync_stats['count']}")
-    if failed_sync_stats["count"] > 0:
-        logger.info(
-            f"  Failed Sync Avg: {failed_sync_stats['avg']:.1f}ms ({failed_sync_stats['count']} failures)"
-        )
-    logger.info("-" * 80)
-    logger.info("TIME TO INTERACTIVE:")
-    logger.info(f"  Average: {interactive_stats['avg']:.1f}ms")
-    logger.info(f"  Min: {interactive_stats['min']:.1f}ms")
-    logger.info(f"  Max: {interactive_stats['max']:.1f}ms")
-    logger.info(f"  Count: {interactive_stats['count']}")
-    logger.info("=" * 80)
+    logger.info(f"Test completed - {login_metrics['successful_logins']}/{total_logins} logins successful ({success_rate:.1f}%), {login_metrics['sync_errors']} sync errors")
 
 
 def track_sync_request(response_time: float, success: bool = True):
@@ -238,9 +184,8 @@ def track_sync_request(response_time: float, success: bool = True):
         sync_metrics["failed_sync_request_count"] += 1
         sync_metrics["failed_sync_response_times"].append(response_time)
 
-    # Calculate requests per second over the last second (successful requests only)
     time_diff = current_time - sync_metrics["last_sync_timestamp"]
-    if time_diff >= 1.0:  # Update RPS every second
+    if time_diff >= 1.0:
         successful_rps = (
             sync_metrics["successful_sync_request_count"] / time_diff
             if time_diff > 0
@@ -258,12 +203,10 @@ def track_sync_request(response_time: float, success: bool = True):
         sync_metrics["failed_sync_request_count"] = 0
         sync_metrics["last_sync_timestamp"] = current_time
 
-        # Keep only last 300 seconds of data (5 minutes)
         sync_metrics["sync_requests_per_second"] = sync_metrics[
             "sync_requests_per_second"
         ][-300:]
 
-    # Keep only last 1000 response times
     sync_metrics["successful_sync_response_times"] = sync_metrics[
         "successful_sync_response_times"
     ][-1000:]
@@ -271,27 +214,16 @@ def track_sync_request(response_time: float, success: bool = True):
         "failed_sync_response_times"
     ][-1000:]
 
-    # Log sync stats every 30 seconds
-    if current_time - sync_metrics["last_report_time"] > 30:
+    if current_time - sync_metrics["last_report_time"] > 60:
         current_rps = (
             sync_metrics["sync_requests_per_second"][-1]["rps"]
             if sync_metrics["sync_requests_per_second"]
             else 0
         )
-        successful_times = sync_metrics["successful_sync_response_times"][-100:]
-        failed_times = sync_metrics["failed_sync_response_times"][-100:]
-        avg_successful_response_time = (
-            sum(successful_times) / len(successful_times) if successful_times else 0
-        )
-        avg_failed_response_time = (
-            sum(failed_times) / len(failed_times) if failed_times else 0
-        )
         total_successful = len(sync_metrics["successful_sync_response_times"])
         total_failed = len(sync_metrics["failed_sync_response_times"])
 
-        logger.info(
-            f"[SYNC STATS] Success RPS: {current_rps:.1f}, Avg Success: {avg_successful_response_time:.1f}ms ({total_successful}), Avg Failed: {avg_failed_response_time:.1f}ms ({total_failed})"
-        )
+        logger.info(f"[SYNC] RPS: {current_rps:.1f}, Success: {total_successful}, Failed: {total_failed}")
         sync_metrics["last_report_time"] = current_time
 
 
@@ -457,7 +389,6 @@ class AppleClientUser(HttpUser):
                         f"[{self.username}] Time to interactive: {self.time_to_interactive:.2f}s"
                     )
 
-                    # Track metrics
                     login_metrics["time_to_interactive"].append(
                         self.time_to_interactive * 1000
                     )
