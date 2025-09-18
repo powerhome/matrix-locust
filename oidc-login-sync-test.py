@@ -11,7 +11,7 @@ import os
 import time
 
 import gevent
-from locust import HttpUser, events
+from locust import FastHttpUser, events
 from locust.runners import MasterRunner, WorkerRunner
 from nio.responses import LoginError, LoginResponse, SyncError
 
@@ -227,7 +227,7 @@ def track_sync_request(response_time: float, success: bool = True):
         sync_metrics["last_report_time"] = current_time
 
 
-class AppleClientUser(HttpUser):
+class AppleClientUser(FastHttpUser):
     wait_time = lambda self: 2
     _user_counter = 0
 
@@ -241,6 +241,39 @@ class AppleClientUser(HttpUser):
         self.sync_task = None
         self.username = None
         self.lazy_loading_filter = None
+
+    def rest(self, method, url, **kwargs):
+        class ResponseWrapper:
+            def __init__(self, response):
+                self._response = response
+                # Add js attribute that returns JSON data
+                try:
+                    self.js = response.json()
+                except:
+                    self.js = {}
+                # Forward other attributes to the original response
+                self.status_code = response.status_code
+                self.headers = response.headers
+                self.text = response.text
+                self.content = response.content
+
+            def success(self):
+                if hasattr(self._response, 'success'):
+                    return self._response.success()
+
+            def failure(self, exc):
+                if hasattr(self._response, 'failure'):
+                    return self._response.failure(exc)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                if hasattr(self._response, '__exit__'):
+                    return self._response.__exit__(*args)
+
+        response = self.client.request(method, url, **kwargs)
+        return ResponseWrapper(response)
 
     def set_user(self, user_id):
         if user_id.find(":") == -1:
@@ -487,7 +520,6 @@ class AppleClientUser(HttpUser):
                 timeout=0,
                 sync_filter=sync_filter,
                 set_presence="online",
-                name=f"initial_sync_{current_sync_type}",
             )
 
             sync_duration = time.time() - start_time
@@ -542,7 +574,6 @@ class AppleClientUser(HttpUser):
                 sync_filter=sync_filter,
                 since=self.sync_token,
                 set_presence="online",
-                name=f"foreground_sync_{current_sync_type}",
             )
 
             sync_time = (time.time() - start_time) * 1000
