@@ -235,10 +235,13 @@ class LocustOIDCClient(LocustClient):
                 return None
 
             form_action = login_form.get("action")
-            if not form_action.startswith("http"):
+            if form_action and not form_action.startswith("http"):
                 # Relative URL, make it absolute
                 base_url = f"{response.url.split('?')[0].rsplit('/', 1)[0]}"
                 form_action = f"{base_url}/{form_action.lstrip('/')}"
+            elif not form_action:
+                # No action attribute, use current URL
+                form_action = f"{response.url.split('?')[0]}"
 
             # Extract any hidden form fields (CSRF tokens, etc.)
             form_data = {}
