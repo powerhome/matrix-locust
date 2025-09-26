@@ -55,7 +55,7 @@ cd python
 poetry run python ./bsspeke_build.py
 ```
 
-### Generating users and rooms
+### Generating users
 
 Before you can use the Locust scripts to load your Matrix server, you
 first need to generate usernames and passwords for your Locust users,
@@ -70,6 +70,30 @@ python generate_users.py
 This generates 1000 users by default and saves the usernames and passwords to
 a file called `users.csv`. You can also pass in a number to specify the number
 of users to generate.
+
+**For OIDC authentication:**
+
+If your Matrix server uses OIDC authentication, use `generate_oidc_users.py` instead:
+
+```console
+export PASSWORD="your_password_here"
+echo -e "user1\nuser2\nuser3" > usernames.txt
+python generate_oidc_users.py \
+  --from-file usernames.txt \
+  --oidc-issuer "https://your-oidc-provider.com" \
+  --output users.csv
+```
+
+Required parameters:
+- `--from-file`: Path to file containing usernames (one per line)
+- `--oidc-issuer`: OIDC issuer URL for authentication
+- `PASSWORD` environment variable must be set
+
+Optional parameters:
+- `--output`: Output CSV file path (default: `users.csv`)
+- `--oidc-client-id`: OIDC client ID (default: `matrix-locust`)
+
+### Generating rooms
 
 Next we need to decide what the rooms are going to look like in our test.
 The `generate_rooms.py` script generates as many rooms as there are users
