@@ -151,8 +151,9 @@ class LocustOIDCClient(LocustClient):
 
                 print(f"Final page reached: (status: {response.status_code})")
 
-                # Step 3: We should now be at the OIDC provider login page
-                # Parse the login form and submit credentials
+                login_token = self._handle_oidc_login(
+                    session, response, username, password, redirect_uri
+                )
                 login_token = self._handle_oidc_login(
                     session, response, username, password, redirect_uri
                 )
@@ -303,17 +304,24 @@ class LocustOIDCClient(LocustClient):
                 print("WARNING: Could not identify password field")
                 # This is more critical - we should see a password field
 
-            # Submit the login form
             login_response = session.post(
                 form_action, data=form_data, allow_redirects=True
             )
             login_response.raise_for_status()
 
-            # Step 4: Follow redirects to get back to Matrix with login token
-            # The callback should contain a login token in the URL
+            if self._is_error_page(login_response):
+                error_message = self._extract_error_message(login_response)
+                if error_message:
+                    print(f"Error message: {error_message}")
+                return None
+
+            if self._is_2fa_required(login_response):
+                login_response = self._handle_2fa(session, login_response)
+                if not login_response:
+                    return None
+
             final_url = login_response.url
 
-            # Extract login token from the callback URL and response
             parsed_url = urllib.parse.urlparse(final_url)
             query_params = urllib.parse.parse_qs(parsed_url.query)
 
@@ -375,10 +383,184 @@ class LocustOIDCClient(LocustClient):
                 print("Could not extract login token from callback")
                 print(f"Final URL: {final_url}")
                 print(f"URL query params: {query_params}")
-                print(f"Response headers: {dict(login_response.headers)}")
                 print(f"Response text preview: {login_response.text[:1000]}...")
                 return None
 
         except Exception as e:
             print(f"Error handling OIDC provider login: {str(e)}")
+            return None
+
+    def _is_2fa_required(self, response: requests.Response) -> bool:
+        """Check if the response indicates 2FA is required."""
+        text_lower = response.text.lower()
+
+        # First check if this is an error page - don't treat errors as 2FA
+        if self._is_error_page(response):
+            return False
+
+        # Check for the specific 2FA page indicators
+        if "enter authentication code" in text_lower:
+            return True
+
+        if "authenticator app" in text_lower and "authentication code" in text_lower:
+            return True
+
+        # Additional checks for common 2FA indicators
+        indicators = [
+            "two-factor", "2fa", "mfa", "multi-factor",
+            "verification code", "totp", "one-time password", "otp"
+        ]
+
+        for indicator in indicators:
+            if indicator in text_lower:
+                return True
+
+        return False
+
+    def _is_error_page(self, response: requests.Response) -> bool:
+        """Check if the response is an error page."""
+        text_lower = response.text.lower()
+
+        # Check for error styling classes
+        error_indicators = [
+            "pb_background_color_error",
+            "error_subtle",
+            "alert-danger",
+            "error-message",
+            "login-error",
+            "authentication failed",
+            "invalid credentials",
+            "incorrect password"
+        ]
+
+        for indicator in error_indicators:
+            if indicator in text_lower:
+                return True
+
+        return False
+
+    def _extract_error_message(self, response: requests.Response) -> Optional[str]:
+        """Extract error message from the response."""
+        try:
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # Look for common error message containers
+            error_selectors = [
+                # Look for elements with error-related classes
+                ".error-message", ".alert-danger", ".login-error",
+                ".pb_body_kit_error", ".notification-error",
+                # Look for elements with error-related text
+                "*[class*='error']", "*[class*='alert']"
+            ]
+
+            for selector in error_selectors:
+                elements = soup.select(selector)
+                for element in elements:
+                    text = element.get_text(strip=True)
+                    if text and len(text) > 5:  # Avoid empty or very short texts
+                        return text
+
+            # Look for any alert or notification divs
+            for div in soup.find_all("div"):
+                div_class = " ".join(div.get("class", [])).lower()
+                if any(term in div_class for term in ["error", "alert", "notification", "message"]):
+                    text = div.get_text(strip=True)
+                    if text and len(text) > 10:
+                        return text
+
+            return None
+
+        except Exception as e:
+            print(f"Error extracting error message: {e}")
+            return None
+
+    def _handle_2fa(self, session: requests.Session, response: requests.Response) -> Optional[requests.Response]:
+        """Handle 2FA authentication by prompting for user input."""
+        try:
+            # Parse the 2FA form
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # Find the 2FA form - look for any form on the page since it's the 2FA page
+            two_fa_form = soup.find("form")
+
+            if not two_fa_form:
+                print("Could not find 2FA form on page")
+                # Debug: show what we found
+                print(f"Page title/headers: {soup.find('h3')}")
+                return None
+
+            # Get form action
+            form_action = two_fa_form.get("action")
+            if form_action and not form_action.startswith("http"):
+                base_url = f"{response.url.split('?')[0].rsplit('/', 1)[0]}"
+                form_action = f"{base_url}/{form_action.lstrip('/')}"
+            elif not form_action:
+                form_action = response.url.split('?')[0]
+
+            # Extract all form fields
+            form_data = {}
+            code_field_name = None
+
+            for input_field in two_fa_form.find_all("input"):
+                field_name = input_field.get("name")
+                field_type = input_field.get("type", "").lower()
+                field_value = input_field.get("value", "")
+
+                if not field_name:
+                    continue
+
+                # Hidden fields - preserve their values
+                if field_type == "hidden":
+                    form_data[field_name] = field_value
+                # Code input field (text/number/tel field that's not hidden)
+                elif field_type in ["text", "number", "tel", ""]:
+                    code_field_name = field_name
+                    # Don't add it to form_data yet - we'll add it with user input
+                # Submit button - preserve if it has a name and value
+                elif field_type == "submit" and field_value:
+                    form_data[field_name] = field_value
+
+            if not code_field_name:
+                print("Could not find 2FA code input field")
+                print(f"Form fields found: {[inp.get('name') for inp in two_fa_form.find_all('input')]}")
+                return None
+
+            # Prompt for 2FA code
+            print("\n" + "="*60)
+            print("2FA AUTHENTICATION REQUIRED")
+            print("="*60)
+            print("Open the authenticator app on your device to view your")
+            print("authentication code and enter it below.")
+            print("="*60)
+            two_fa_code = input("Enter your 6-digit authentication code: ").strip()
+
+            if not two_fa_code:
+                print("No 2FA code provided, cancelling authentication")
+                return None
+
+            # Add the 2FA code to form data
+            form_data[code_field_name] = two_fa_code
+
+            # Submit the 2FA form
+            print(f"Submitting 2FA code...")
+            two_fa_response = session.post(
+                form_action, data=form_data, allow_redirects=True
+            )
+            two_fa_response.raise_for_status()
+
+            print(f"2FA submission response status: {two_fa_response.status_code}")
+            print(f"2FA response URL: {two_fa_response.url}")
+
+            # Check if we're still on a 2FA page (failed) or moved on (success)
+            if self._is_2fa_required(two_fa_response):
+                print("2FA authentication failed - still on 2FA page")
+                # Could retry here if desired
+                return None
+
+            return two_fa_response
+
+        except Exception as e:
+            print(f"Error handling 2FA: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
