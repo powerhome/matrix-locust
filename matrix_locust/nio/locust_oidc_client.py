@@ -39,7 +39,7 @@ class LocustOIDCClient(LocustClient):
             oidc_issuer (str): The OIDC issuer URL (e.g., https://id.powerhrg.com).
             client_id (str): The OIDC client ID.
             device_name (str): A display name for the device.
-            redirect_uri (str, optional): The redirect URI for OIDC callback. 
+            redirect_uri (str, optional): The redirect URI for OIDC callback.
                 If not provided, defaults to the Matrix homeserver's OIDC callback endpoint.
             username (str): Username for OIDC provider login.
             password (str): Password for OIDC provider login.
@@ -48,12 +48,6 @@ class LocustOIDCClient(LocustClient):
         a `LoginError` if there was an error with the request.
         """
         try:
-            # Get credentials from client attributes if not provided
-            if username is None:
-                username = getattr(self, "oidc_username", None)
-            if password is None:
-                password = getattr(self, "oidc_password", None)
-
             # Construct default redirect_uri from Matrix homeserver URL if not provided
             if redirect_uri is None:
                 matrix_base_url = f"{self.locust_user.host}"
@@ -484,9 +478,6 @@ class LocustOIDCClient(LocustClient):
             two_fa_form = soup.find("form")
 
             if not two_fa_form:
-                print("Could not find 2FA form on page")
-                # Debug: show what we found
-                print(f"Page title/headers: {soup.find('h3')}")
                 return None
 
             # Get form action
@@ -521,46 +512,29 @@ class LocustOIDCClient(LocustClient):
                     form_data[field_name] = field_value
 
             if not code_field_name:
-                print("Could not find 2FA code input field")
-                print(f"Form fields found: {[inp.get('name') for inp in two_fa_form.find_all('input')]}")
                 return None
 
             # Prompt for 2FA code
-            print("\n" + "="*60)
-            print("2FA AUTHENTICATION REQUIRED")
-            print("="*60)
-            print("Open the authenticator app on your device to view your")
-            print("authentication code and enter it below.")
-            print("="*60)
             two_fa_code = input("Enter your 6-digit authentication code: ").strip()
 
             if not two_fa_code:
-                print("No 2FA code provided, cancelling authentication")
                 return None
 
             # Add the 2FA code to form data
             form_data[code_field_name] = two_fa_code
 
             # Submit the 2FA form
-            print(f"Submitting 2FA code...")
             two_fa_response = session.post(
                 form_action, data=form_data, allow_redirects=True
             )
             two_fa_response.raise_for_status()
 
-            print(f"2FA submission response status: {two_fa_response.status_code}")
-            print(f"2FA response URL: {two_fa_response.url}")
-
             # Check if we're still on a 2FA page (failed) or moved on (success)
             if self._is_2fa_required(two_fa_response):
-                print("2FA authentication failed - still on 2FA page")
                 # Could retry here if desired
                 return None
 
             return two_fa_response
 
-        except Exception as e:
-            print(f"Error handling 2FA: {str(e)}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
             return None
