@@ -55,7 +55,7 @@ cd python
 poetry run python ./bsspeke_build.py
 ```
 
-### Generating users and rooms
+### Generating users
 
 Before you can use the Locust scripts to load your Matrix server, you
 first need to generate usernames and passwords for your Locust users,
@@ -70,6 +70,46 @@ python generate_users.py
 This generates 1000 users by default and saves the usernames and passwords to
 a file called `users.csv`. You can also pass in a number to specify the number
 of users to generate.
+
+**For OIDC authentication:**
+
+If your Matrix server uses OIDC authentication, use `generate_oidc_users.py` to create CSVs that include the OIDC fields required by the OIDC-enabled client used by this repo.
+
+1. Create setup users (seed data creators)
+
+These users will authenticate via OIDC and create rooms/messages to seed test data. Save their credentials in `setup-users.csv` with the columns: `username,password,oidc_issuer,oidc_client_id,user_id`.
+
+```console
+export PASSWORD="your_password_here"
+echo -e "seed01\nseed02\nseed03" > setup_usernames.txt
+python generate_oidc_users.py \
+  --from-file setup_usernames.txt \
+  --oidc-issuer "https://your-oidc-provider.com" \
+  --oidc-client-id "matrix-locust" \
+  --output setup-users.csv
+```
+
+2. Create load-test users
+
+These users will authenticate via OIDC and participate in the load test. Save their credentials in `users.csv` with the same columns.
+
+```console
+export PASSWORD="your_password_here"
+echo -e "user1\nuser2\nuser3" > usernames.txt
+python generate_oidc_users.py \
+  --from-file usernames.txt \
+  --oidc-issuer "https://your-oidc-provider.com" \
+  --oidc-client-id "matrix-locust" \
+  --output users.csv
+```
+
+Notes:
+
+- `PASSWORD` must be set in the environment; all generated users share this password.
+- `--oidc-client-id` defaults to `matrix-locust` if omitted.
+- The generated CSVs have the header `username,password,oidc_issuer,oidc_client_id,user_id` which downstream scripts expect.
+
+### Generating rooms
 
 Next we need to decide what the rooms are going to look like in our test.
 The `generate_rooms.py` script generates as many rooms as there are users
@@ -131,6 +171,27 @@ poetry run python run.py matrix_locust/client_server/join.py
 
 ```console
 poetry run python run.py locust-run-users.py
+```
+
+### OIDC end-to-end examples
+
+Seed test data (rooms, messages, optional reactions) using OIDC-authenticated setup users:
+
+```console
+python create-test-rooms-and-events.py \
+  --host https://matrix.example.com \
+  --setup-users setup-users.csv \
+  --test-users users.csv \
+  --rooms 10 \
+  --messages 5 \
+  --reactions 5 \
+  --external-users-csv user_external_ids.csv
+```
+
+Then run the OIDC-enabled load test (users read from `users.csv`):
+
+```console
+locust -f locust-run-users.py --host https://matrix.example.com
 ```
 
 You can also directly run Locust without using the helper `run.py` script

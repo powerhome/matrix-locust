@@ -3,8 +3,10 @@ __pycache__
 *.swp
 admin.json
 users.csv
+*.txt
+*.csv
 rooms.json
-tokens.csv
+test_rooms.json
 images
 venv
 data
@@ -15,3 +17,4 @@ locust.csv_failures.csv
 locust.csv_stats.csv
 locust.csv_stats_history.csv
 locust.html
+
